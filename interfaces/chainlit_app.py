@@ -52,7 +52,7 @@ class ChatbotSession:
         # ✅ CONFIGURACIÓN DE ESTADO PERSISTENTE
         self.config = {
             "configurable": {"thread_id": self.thread_id},
-            "recursion_limit": 15  # Límite de recursión
+            "recursion_limit": 100  # Límite de recursión
         }
         
         # Estado de la sesión

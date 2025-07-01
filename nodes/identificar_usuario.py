@@ -52,7 +52,14 @@ class IdentificarUsuarioNode(BaseNode):
         nombre_actual = state.get("nombre")
         email_actual = state.get("email")
         intentos = self.increment_attempts(state, "intentos")
-        
+        # ✅ EARLY STOPPING - Prevenir bucles infinitos
+        if intentos > 3:
+            self.logger.warning(f"🛑 EARLY STOPPING: Demasiados intentos ({intentos})")
+            return self.signal_escalation(
+                state,
+                f"identificar usuario después de {intentos} intentos fallidos",
+                attempts=intentos
+            )
         self.logger.info(f"📊 Estado: Nombre={nombre_actual}, Email={email_actual}, Intentos={intentos}")
         
         # ✅ DECISIÓN 1: Si ya tengo datos completos, COMPLETAR

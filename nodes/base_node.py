@@ -200,6 +200,10 @@ class BaseNode(ABC):
         """Incrementar intentos de manera consistente"""
         current = state.get(attempt_key, 0)
         new_attempts = current + 1
+        
+        # ✅ ACTUALIZAR EL ESTADO
+        state[attempt_key] = new_attempts
+        
         self._actor_state["execution_count"] += 1
         self.logger.debug(f"🔄 Intento {new_attempts} para {attempt_key}")
         return new_attempts
