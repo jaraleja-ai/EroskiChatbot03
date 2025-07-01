@@ -87,6 +87,11 @@ class IncidenciaWorkflow(BaseWorkflow):
     def _route_conversation(self, state: Dict[str, Any]) -> str:
         """Router híbrido con protección contra bucles"""
         
+        # 🛑 PRIORIDAD 1: Si está esperando nuevo input, NO CONTINUAR
+        if state.get("waiting_for_new_input", False):
+            self.logger.info("⏸️ ESPERANDO NUEVO INPUT → DETENER")
+            return "escalar_supervisor"  # O END si prefieres
+        
         # 🛑 DETECTAR BUCLES EN EL ROUTER
         execution_count = state.get("_execution_count", 0)
         if execution_count > 5:

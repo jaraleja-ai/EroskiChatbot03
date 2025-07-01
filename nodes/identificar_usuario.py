@@ -38,88 +38,48 @@ class IdentificarUsuarioNode(BaseNode):
         )
 
     async def execute(self, state: Dict[str, Any]) -> Command:
-        """🎭 LÓGICA DEL ACTOR con protección contra bucles"""
+        """🎭 LÓGICA DEL ACTOR con detección de mensaje repetido"""
         
-        # 🔍 ANÁLISIS DEL ESTADO ACTUAL
+        # 🔍 OBTENER MENSAJE ACTUAL
+        current_message = self.get_last_user_message(state)
+        last_processed = state.get("_last_processed_message", "")
+        
+        self.logger.info(f"🔍 === INICIANDO IDENTIFICARUSUARIO ===")
+        self.logger.info(f"📥 Mensaje actual: '{current_message}'")
+        self.logger.info(f"📜 Último procesado: '{last_processed}'")
+        
+        # 🛑 DETECCIÓN DE MENSAJE REPETIDO
+        if current_message == last_processed and current_message:
+            self.logger.warning(f"🔄 MENSAJE REPETIDO DETECTADO - DETENIENDO BUCLE")
+            
+            return Command(update={
+                "messages": [AIMessage(content="Estoy esperando tu respuesta con tu nombre y email. ¿Puedes proporcionármelos?")],
+                "requires_user_input": True,
+                "waiting_for_new_input": True,
+                "_actor_decision": "waiting_new_input"
+            })
+        
+        # ✅ MARCAR MENSAJE COMO PROCESADO
+        state["_last_processed_message"] = current_message
+        state["waiting_for_new_input"] = False
+        
+        # 🔍 ANÁLISIS DEL ESTADO
         nombre_actual = state.get("nombre")
         email_actual = state.get("email")
+        intentos = self.increment_attempts(state, "intentos")
         
-        # ✅ CONTADOR DE EJECUCIONES EN LUGAR DE INTENTOS
-        execution_count = state.get("_execution_count", 0) + 1
-        state["_execution_count"] = execution_count
+        self.logger.info(f"📊 Estado: Nombre={nombre_actual}, Email={email_actual}, Intentos={intentos}")
         
-        # 🛑 EARLY STOPPING AGRESIVO
-        if execution_count > 3:
-            self.logger.warning(f"🛑 BUCLE DETECTADO: {execution_count} ejecuciones")
-            
-            # FORZAR ESCALACIÓN INMEDIATAMENTE
-            return Command(update={
-                "escalar_a_supervisor": True,
-                "razon_escalacion": f"Bucle infinito detectado después de {execution_count} ejecuciones",
-                "messages": [AIMessage(content="He detectado un problema técnico. Derivando a un supervisor para ayudarte mejor.")],
-                "_next_actor": "escalar_supervisor"
-            })
-        
-        self.logger.info(f"📊 Estado: Nombre={nombre_actual}, Email={email_actual}, Ejecución={execution_count}")
-        
-        # ✅ DECISIÓN 1: Si ya tengo datos completos, COMPLETAR INMEDIATAMENTE
+        # ✅ DECISIÓN 1: Datos completos
         if nombre_actual and email_actual:
-            self.logger.info("✅ DATOS COMPLETOS - Finalizando")
-            return Command(update={
-                "datos_usuario_completos": True,
-                "flujo_completado": True,
-                "_next_actor": "procesar_incidencia",
-                "messages": [AIMessage(content=f"¡Perfecto {nombre_actual}! Ahora cuéntame tu problema técnico.")]
-            })
+            return self._actor_complete_with_data(nombre_actual, email_actual)
         
-        # ✅ EXTRACCIÓN DE DATOS (solo si no tengo datos)
-        ultimo_mensaje = self.get_last_user_message(state)
+        # ✅ DECISIÓN 2: Escalar si muchos intentos
+        if intentos > 3:
+            return self.signal_escalation(state, "obtener datos de usuario", attempts=intentos)
         
-        try:
-            datos_extraidos = await extraer_datos_usuario(ultimo_mensaje)
-            nombre_extraido = datos_extraidos.nombre
-            email_extraido = datos_extraidos.email
-            
-            # Consolidar datos
-            nombre_final = nombre_extraido or nombre_actual
-            email_final = email_extraido or email_actual
-            
-            if nombre_final and email_final:
-                # COMPLETAR INMEDIATAMENTE
-                return Command(update={
-                    "nombre": nombre_final,
-                    "email": email_final,
-                    "datos_usuario_completos": True,
-                    "_next_actor": "procesar_incidencia",
-                    "messages": [AIMessage(content=f"¡Perfecto {nombre_final}! Ahora cuéntame tu problema técnico.")]
-                })
-            else:
-                # PEDIR DATOS CON LÍMITE
-                if execution_count >= 2:
-                    # Después de 2 intentos, usar formato simple
-                    return Command(update={
-                        "escalar_a_supervisor": True,
-                        "razon_escalacion": "No se pudieron obtener datos de usuario",
-                        "messages": [AIMessage(content="Tengo dificultades para obtener tus datos. Derivando a un supervisor.")],
-                        "_next_actor": "escalar_supervisor"
-                    })
-                else:
-                    # Primer intento normal
-                    return Command(update={
-                        "messages": [AIMessage(content="¡Hola! Necesito tu nombre completo y email para ayudarte. Por favor compártelos.")],
-                        # NO establecer _next_actor para que el router decida
-                    })
-                    
-        except Exception as e:
-            self.logger.error(f"❌ Error: {e}")
-            return Command(update={
-                "escalar_a_supervisor": True,
-                "razon_escalacion": f"Error técnico: {str(e)}",
-                "messages": [AIMessage(content="He tenido un error técnico. Derivando a un supervisor.")],
-                "_next_actor": "escalar_supervisor"
-            })
-
-
+        # ✅ DECISIÓN 3: Procesar input
+        return await self._process_user_input(state, nombre_actual, email_actual, intentos)
 
     async def _process_user_input(
         self, 
