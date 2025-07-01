@@ -84,8 +84,8 @@ class IdentificarUsuarioNode(BaseNode):
         try:
             # Extraer datos del mensaje
             datos_extraidos = await extraer_datos_usuario(ultimo_mensaje)
-            nombre_extraido = datos_extraidos.get("nombre")
-            email_extraido = datos_extraidos.get("email")
+            nombre_extraido = getattr(datos_extraidos, 'nombre', None)
+            email_extraido = getattr(datos_extraidos, 'email', None)
             
             self.logger.info(f"🔍 Extraído: Nombre={nombre_extraido}, Email={email_extraido}")
             
@@ -131,13 +131,13 @@ class IdentificarUsuarioNode(BaseNode):
         # ✅ SEÑAL CLARA AL ROUTER: "Estoy completo, ir a procesar incidencia"
         return self.signal_completion(
             state={},
-            next_actor="procesar_incidencia",
+            next_actor="procesar_incidencia",  # ✅ SEÑAL EXPLÍCITA
             completion_message=mensaje_confirmacion,
             # Datos actualizados
             nombre=nombre,
             email=email,
             datos_usuario_completos=True,  # 🔑 CLAVE: Evita bucles
-            intentos=0  # Reset intentos
+            intentos=0  # Reset intentos para el siguiente actor
         )
     
     def _request_name_specifically(self, email: str, intentos: int) -> Command:
@@ -227,8 +227,8 @@ class IdentificarUsuarioNode(BaseNode):
         try:
             # Extraer datos del mensaje del usuario
             datos_extraidos = await extraer_datos_usuario(ultimo_mensaje)
-            nombre_extraido = datos_extraidos.get("nombre")
-            email_extraido = datos_extraidos.get("email")
+            nombre_extraido = getattr(datos_extraidos, 'nombre', None)
+            email_extraido = getattr(datos_extraidos, 'email', None)
             
             # Obtener datos que ya teníamos (mantener estado)
             nombre_actual = state.get("nombre")
@@ -274,6 +274,32 @@ class IdentificarUsuarioNode(BaseNode):
             request_message=mensaje,
             context={"waiting_for": "user_data", "have_email": bool(email), "have_name": bool(nombre)}
         )
+
+    # =====================================================
+    # PREVENIR BUCLES - Agregar límite de recursión
+    # =====================================================
+
+    def _prevent_infinite_loops(self, state: Dict[str, Any]) -> Command:
+        """
+        Prevenir bucles infinitos con límite de intentos.
+        
+        Si se exceden los intentos, escalar o cambiar estrategia.
+        """
+        intentos = state.get("intentos", 0)
+        
+        if intentos >= 5:  # Límite máximo
+            self.logger.warning(f"🔄 BUCLE DETECTADO: {intentos} intentos en identificar_usuario")
+            
+            # Escalar a supervisor en lugar de continuar el bucle
+            return self.signal_escalation(
+                state,
+                f"identificar usuario después de {intentos} intentos",
+                attempts=intentos
+            )
+        
+        return None  # Continuar normalmente
+
+
 # =====================================================
 # WRAPPER PARA LANGGRAPH
 # =====================================================

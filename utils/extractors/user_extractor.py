@@ -1,10 +1,10 @@
 # =====================================================
-# utils/extractors/user_extractor.py - Extractor de datos de usuario
+# utils/extractors/user_extractor.py - Extractor de datos de usuario CORREGIDO
 # =====================================================
 from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
 from langchain.prompts import PromptTemplate
-from typing import Optional
+from typing import Optional, Dict, Any
 import logging
 
 from utils.llm.providers import get_llm
@@ -19,6 +19,66 @@ class UsuarioExtraido(BaseModel):
     numero_empleado: Optional[str] = Field(None, description="Número de empleado si se menciona")
     confianza_nombre: float = Field(0.0, description="Confianza en la extracción del nombre (0-1)")
     confianza_email: float = Field(0.0, description="Confianza en la extracción del email (0-1)")
+    
+    # ✅ MÉTODO .get() AGREGADO PARA COMPATIBILIDAD
+    def get(self, key: str, default=None):
+        """
+        Método para acceso tipo diccionario.
+        Permite usar objeto.get('campo', default) como un dict.
+        
+        Args:
+            key: Nombre del atributo
+            default: Valor por defecto si no existe
+            
+        Returns:
+            Valor del atributo o default
+        """
+        try:
+            return getattr(self, key, default)
+        except AttributeError:
+            return default
+    
+    # ✅ MÉTODO PARA CONVERSIÓN A DICT
+    def to_dict(self) -> Dict[str, Any]:
+        """Convertir a diccionario para facilitar acceso."""
+        return {
+            'nombre': self.nombre,
+            'email': self.email,
+            'numero_empleado': self.numero_empleado,
+            'confianza_nombre': self.confianza_nombre,
+            'confianza_email': self.confianza_email
+        }
+    
+    # ✅ MÉTODO PARA VERIFICAR SI TIENE DATOS VÁLIDOS
+    def has_valid_data(self, min_confidence: float = 0.5) -> bool:
+        """
+        Verificar si tiene datos válidos con confianza mínima.
+        
+        Args:
+            min_confidence: Confianza mínima requerida
+            
+        Returns:
+            True si tiene al menos un campo con confianza suficiente
+        """
+        return (
+            (self.nombre and self.confianza_nombre >= min_confidence) or
+            (self.email and self.confianza_email >= min_confidence)
+        )
+    
+    # ✅ MÉTODO PARA OBTENER MEJOR DATO DISPONIBLE
+    def get_best_identifier(self) -> Optional[str]:
+        """
+        Obtener el mejor identificador disponible.
+        
+        Returns:
+            Email si existe, sino nombre, sino None
+        """
+        if self.email and self.confianza_email > 0.3:
+            return self.email
+        elif self.nombre and self.confianza_nombre > 0.3:
+            return self.nombre
+        else:
+            return None
 
 # Parser para convertir respuesta LLM a objeto Pydantic
 parser = PydanticOutputParser(pydantic_object=UsuarioExtraido)
@@ -82,4 +142,3 @@ async def extraer_datos_usuario(mensaje: str) -> UsuarioExtraido:
         logger.error(f"❌ Error en extracción de usuario: {e}")
         # Retornar objeto vacío en caso de error
         return UsuarioExtraido()
-
