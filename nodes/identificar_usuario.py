@@ -72,7 +72,7 @@ class IdentificarUsuarioNode(BaseNode):
         
         # ✅ DECISIÓN 1: Datos completos
         if nombre_actual and email_actual:
-            return self._actor_complete_with_data(nombre_actual, email_actual, intentos)
+            return self._actor_complete_with_data(state, nombre_actual, email_actual, intentos)
         
         # ✅ DECISIÓN 2: Escalar si muchos intentos
         if intentos > 3:
@@ -107,11 +107,11 @@ class IdentificarUsuarioNode(BaseNode):
             # 🎯 DECISIÓN AUTÓNOMA basada en datos disponibles
             if nombre_final and email_final:
                 # ✅ TENGO TODO → Actualizar estado y completar
-                return self._actor_complete_with_data(nombre_final, email_final, intentos)
+                return self._actor_complete_with_data(state,nombre_final, email_final, intentos)
             
             elif email_final and not nombre_final:
                 # 📥 TENGO EMAIL, FALTA NOMBRE → Solicitar nombre específicamente
-                return self._request_name_specifically(email_final, intentos)
+                return self._request_name_specifically(state, email_final, intentos)
             
             elif nombre_final and not email_final:
                 # 📥 TENGO NOMBRE, FALTA EMAIL → Solicitar email específicamente
@@ -119,13 +119,13 @@ class IdentificarUsuarioNode(BaseNode):
             
             else:
                 # 📥 NO TENGO NADA → Solicitar ambos
-                return self._request_both_data(intentos)
+                return self._request_both_data(state, intentos)
                 
         except Exception as e:
             self.logger.error(f"❌ Error extrayendo datos: {e}")
-            return self._request_both_data(intentos)
+            return self._request_both_data(state, intentos)
     
-    def _actor_complete_with_data(self, nombre: str, email: str, intentos: int) -> Command:
+    def _actor_complete_with_data(self, state, nombre: str, email: str, intentos: int) -> Command:
         """
         🎯 DECISIÓN DEL ACTOR: COMPLETAR TAREA
         
@@ -141,7 +141,7 @@ class IdentificarUsuarioNode(BaseNode):
         
         # ✅ SEÑAL CLARA AL ROUTER: "Estoy completo, ir a procesar incidencia"
         return self.signal_completion(
-            state={},
+            state=state,
             next_actor="procesar_incidencia",  # ✅ SEÑAL EXPLÍCITA
             completion_message=mensaje_confirmacion,
             # Datos actualizados
@@ -151,17 +151,18 @@ class IdentificarUsuarioNode(BaseNode):
             intentos=intentos  # Reset intentos para el siguiente actor
         )
     
-    def _request_name_specifically(self, email: str, intentos: int) -> Command:
+    def _request_name_specifically(self, state, email: str, intentos: int) -> Command:
         """🎯 DECISIÓN DEL ACTOR: Solicitar nombre específicamente"""
         
         mensaje = (
             f"Tengo tu email ({email}). "
             f"¿Cuál es tu **nombre completo**?"
         )
+
         
         # ✅ SEÑAL AL ROUTER: "Necesito input específico"
         return self.signal_need_input(
-            state={"email": email, "intentos": intentos},
+            state=state.update({"email": email, "intentos": intentos}),
             request_message=mensaje,
             context={"waiting_for": "nombre", "have_email": email}
         )
@@ -181,7 +182,7 @@ class IdentificarUsuarioNode(BaseNode):
             context={"waiting_for": "email", "have_name": nombre}
         )
     
-    def _request_both_data(self, intentos: int) -> Command:
+    def _request_both_data(self, state, intentos: int) -> Command:
         """🎯 DECISIÓN DEL ACTOR: Solicitar ambos datos"""
         
         if intentos == 1:
@@ -199,7 +200,7 @@ class IdentificarUsuarioNode(BaseNode):
         
         # ✅ SEÑAL AL ROUTER: "Necesito input de usuario"
         return self.signal_need_input(
-            state={"intentos": intentos},
+            state=state.update({"intentos": intentos}),
             request_message=mensaje,
             context={"waiting_for": ["nombre", "email"]}
         )

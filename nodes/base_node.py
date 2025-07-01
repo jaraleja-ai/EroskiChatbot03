@@ -97,6 +97,7 @@ class BaseNode(ABC):
         self._record_decision(ActorDecision.COMPLETE, next_actor)
         
         update_data = {
+            **state
             **actor_data,
             "_actor_decision": ActorDecision.COMPLETE,
             "_next_actor": next_actor,  # Señal explícita al router
@@ -148,8 +149,8 @@ class BaseNode(ABC):
         self._record_decision(ActorDecision.DELEGATE, delegate_to)
         
         update_data = {
-            **context_data,
             **state,
+            **context_data,
             "_actor_decision": ActorDecision.DELEGATE,
             "_next_actor": delegate_to,
             "_delegation_reason": delegation_reason
