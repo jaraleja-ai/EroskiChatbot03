@@ -50,6 +50,8 @@ class IncidenciaWorkflow(BaseWorkflow):
         if next_actor:
             self.logger.info(f"🎯 ACTOR DECIDIÓ → {next_actor}")
             # Limpiar señal para evitar loops
+            # ✅ IMPORTANTE: Limpiar la señal para evitar loops
+            state["_next_actor"] = None  # AGREGAR ESTA LÍNEA
             return next_actor
         
         # 🔼 2. ESCALACIÓN solicitada por actor

@@ -193,6 +193,87 @@ class IdentificarUsuarioNode(BaseNode):
             context={"waiting_for": ["nombre", "email"]}
         )
 
+    async def _confirm_user_data(self, state: Dict[str, Any], nombre: str, email: str, intentos: int) -> Command:
+        """✅ CONFIRMAR DATOS Y SEÑALAR COMPLETITUD AL ROUTER"""
+        
+        # 📝 Mensaje de confirmación para el usuario
+        mensaje_confirmacion = (
+            f"¡Perfecto, {nombre}! Ya tengo tus datos:\n"
+            f"📧 **Email**: {email}\n"
+            f"👤 **Nombre**: {nombre}\n\n"
+            f"Ahora cuéntame, ¿cuál es el problema técnico que necesitas resolver?"
+        )
+        
+        # ✅ SEÑAL CLARA AL ROUTER: "Estoy completo, ir a procesar incidencia"
+        return self.signal_completion(
+            state=state,
+            next_actor="procesar_incidencia",
+            completion_message=mensaje_confirmacion,
+            # Datos actualizados
+            nombre=nombre,
+            email=email,
+            datos_usuario_completos=True,  # 🔑 EVITA BUCLES
+            intentos=0  # Reset intentos
+        )
+
+    async def _handle_data_extraction_flow(self, state: Dict[str, Any], intentos: int) -> Command:
+        """
+        Flujo principal de extracción de datos del usuario.
+        
+        VERSIÓN HÍBRIDA que evita bucles infinitos mediante señalización clara.
+        """
+        ultimo_mensaje = self.get_last_user_message(state)
+        
+        try:
+            # Extraer datos del mensaje del usuario
+            datos_extraidos = await extraer_datos_usuario(ultimo_mensaje)
+            nombre_extraido = datos_extraidos.get("nombre")
+            email_extraido = datos_extraidos.get("email")
+            
+            # Obtener datos que ya teníamos (mantener estado)
+            nombre_actual = state.get("nombre")
+            email_actual = state.get("email")
+            
+            # Consolidar datos (mantener los que ya teníamos)
+            nombre_final = nombre_extraido or nombre_actual
+            email_final = email_extraido or email_actual
+            
+            self.logger.info(f"🔍 Datos consolidados - Nombre: {nombre_final}, Email: {email_final}")
+            
+            # ✅ DECISIÓN AUTÓNOMA basada en datos disponibles
+            if nombre_final and email_final:
+                # TENGO TODO → Completar inmediatamente
+                return await self._confirm_user_data(state, nombre_final, email_final, intentos)
+            else:
+                # FALTAN DATOS → Solicitar específicamente lo que falta
+                return await self._handle_incomplete_data(state, nombre_final, email_final, intentos)
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error extrayendo datos: {e}")
+            
+            # En caso de error, solicitar datos básicos
+            return self.signal_need_input(
+                state={"intentos": intentos},
+                request_message="Disculpa, no pude procesar tu mensaje. ¿Puedes proporcionarme tu nombre completo y email corporativo?",
+                context={"error": str(e), "waiting_for": ["nombre", "email"]}
+            )
+
+    async def _handle_incomplete_data(self, state: Dict[str, Any], nombre: str, email: str, intentos: int) -> Command:
+        """📥 MANEJAR DATOS INCOMPLETOS SIN BUCLES"""
+        
+        if email and not nombre:
+            mensaje = f"Tengo tu email ({email}). ¿Cuál es tu **nombre completo**?"
+        elif nombre and not email:
+            mensaje = f"Hola {nombre}, necesito tu **email corporativo**."
+        else:
+            mensaje = "Necesito tu **nombre completo** y **email corporativo**. ¿Puedes proporcionármelos?"
+        
+        # ✅ SEÑAL AL ROUTER: "Necesito input específico"
+        return self.signal_need_input(
+            state={"email": email, "nombre": nombre, "intentos": intentos},
+            request_message=mensaje,
+            context={"waiting_for": "user_data", "have_email": bool(email), "have_name": bool(nombre)}
+        )
 # =====================================================
 # WRAPPER PARA LANGGRAPH
 # =====================================================
