@@ -1,0 +1,55 @@
+[project]
+# Nombre que aparecerá en la interfaz
+name = "🛠️ Asistente de Incidencias"
+
+# Configuración del chat
+[UI]
+# Título de la página
+name = "Asistente de Incidencias"
+
+# Descripción
+description = "Tu asistente inteligente para resolver incidencias técnicas"
+
+# Ocultar el botón de "Made with Chainlit"
+hide_cot = false
+
+# Tema (light o dark)
+default_collapse_content = true
+
+# Configuración de la ventana de chat
+[UI.theme]
+primary_color = "#FF6B35"
+background_color = "#FAFAFA"
+paper_color = "#FFFFFF"
+
+[meta]
+generated_by = "0.7.0"
+
+# Configuración del servidor
+[project.settings]
+# Puerto (opcional)
+# port = 8000
+
+# Host (opcional)  
+# host = "localhost"
+
+# Autoreload durante desarrollo
+auto_reload = true
+
+# Configuración de variables de entorno (corregida)
+user_env = []
+
+# Configuración de archivos
+[project.file]
+# Máximo tamaño de archivo para uploads (en MB)
+max_size_mb = 100
+
+# Tipos de archivo permitidos
+allowed_mime_types = [
+    "text/plain",
+    "application/pdf",
+    "text/csv",
+    "application/json",
+    "image/jpeg",
+    "image/png"
+]
