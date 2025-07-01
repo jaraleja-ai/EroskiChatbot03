@@ -72,7 +72,7 @@ class IdentificarUsuarioNode(BaseNode):
         
         # ✅ DECISIÓN 1: Datos completos
         if nombre_actual and email_actual:
-            return self._actor_complete_with_data(nombre_actual, email_actual)
+            return self._actor_complete_with_data(nombre_actual, email_actual, intentos)
         
         # ✅ DECISIÓN 2: Escalar si muchos intentos
         if intentos > 3:
@@ -107,7 +107,7 @@ class IdentificarUsuarioNode(BaseNode):
             # 🎯 DECISIÓN AUTÓNOMA basada en datos disponibles
             if nombre_final and email_final:
                 # ✅ TENGO TODO → Actualizar estado y completar
-                return self._actor_complete_with_data(nombre_final, email_final)
+                return self._actor_complete_with_data(nombre_final, email_final, intentos)
             
             elif email_final and not nombre_final:
                 # 📥 TENGO EMAIL, FALTA NOMBRE → Solicitar nombre específicamente
@@ -125,7 +125,7 @@ class IdentificarUsuarioNode(BaseNode):
             self.logger.error(f"❌ Error extrayendo datos: {e}")
             return self._request_both_data(intentos)
     
-    def _actor_complete_with_data(self, nombre: str, email: str) -> Command:
+    def _actor_complete_with_data(self, nombre: str, email: str, intentos: int) -> Command:
         """
         🎯 DECISIÓN DEL ACTOR: COMPLETAR TAREA
         
@@ -148,7 +148,7 @@ class IdentificarUsuarioNode(BaseNode):
             nombre=nombre,
             email=email,
             datos_usuario_completos=True,  # 🔑 CLAVE: Evita bucles
-            intentos=0  # Reset intentos para el siguiente actor
+            intentos=intentos  # Reset intentos para el siguiente actor
         )
     
     def _request_name_specifically(self, email: str, intentos: int) -> Command:
@@ -204,7 +204,7 @@ class IdentificarUsuarioNode(BaseNode):
             context={"waiting_for": ["nombre", "email"]}
         )
 
-    async def _confirm_user_data(self, state: Dict[str, Any], nombre: str, email: str, intentos: int) -> Command:
+    async def _confirm_user_data(self, state: Dict[str, Any], nombre: str, email: str) -> Command:
         """✅ CONFIRMAR DATOS Y SEÑALAR COMPLETITUD AL ROUTER"""
         
         # 📝 Mensaje de confirmación para el usuario
@@ -254,7 +254,7 @@ class IdentificarUsuarioNode(BaseNode):
             # ✅ DECISIÓN AUTÓNOMA basada en datos disponibles
             if nombre_final and email_final:
                 # TENGO TODO → Completar inmediatamente
-                return await self._confirm_user_data(state, nombre_final, email_final, intentos)
+                return await self._confirm_user_data(state, nombre_final, email_final)
             else:
                 # FALTAN DATOS → Solicitar específicamente lo que falta
                 return await self._handle_incomplete_data(state, nombre_final, email_final, intentos)

@@ -123,6 +123,7 @@ class BaseNode(ABC):
         self._record_decision(ActorDecision.NEED_INPUT, "user")
         
         update_data = {
+            **state,
             "_actor_decision": ActorDecision.NEED_INPUT,
             "_request_message": request_message,
             "_input_context": context or {},
@@ -148,6 +149,7 @@ class BaseNode(ABC):
         
         update_data = {
             **context_data,
+            **state,
             "_actor_decision": ActorDecision.DELEGATE,
             "_next_actor": delegate_to,
             "_delegation_reason": delegation_reason
@@ -200,9 +202,6 @@ class BaseNode(ABC):
         """Incrementar intentos de manera consistente"""
         current = state.get(attempt_key, 0)
         new_attempts = current + 1
-        
-        # ✅ ACTUALIZAR EL ESTADO
-        state[attempt_key] = new_attempts
         
         self._actor_state["execution_count"] += 1
         self.logger.debug(f"🔄 Intento {new_attempts} para {attempt_key}")
@@ -288,7 +287,7 @@ class BaseNode(ABC):
         self.logger.debug("✅ Estado válido para actor")
         return True
     
-    async def handle_error(self, error: Exception, state: Dict[str, Any]) -> Command:
+    async def handle_error(self, error: Exception, state: Dict[str, Any], intentos: int =0,) -> Command:
         """Manejo centralizado de errores"""
         error_msg = f"Error en {self.name}: {str(error)}"
         
@@ -302,6 +301,7 @@ class BaseNode(ABC):
         
         # Intentar recuperación
         return Command(update={
+            "intentos":0,
             "error_info": {
                 "actor": self.name,
                 "error": str(error),
