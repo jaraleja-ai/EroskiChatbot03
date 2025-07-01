@@ -10,139 +10,6 @@ from langgraph.graph import StateGraph, START, END
 from workflow import BaseWorkflow
 from models import GraphState
 from typing import Dict, Any
-
-class IncidenciaWorkflow(BaseWorkflow):
-    """
-    🎭 WORKFLOW HÍBRIDO: LangGraph + Actor Pattern
-    
-    PRINCIPIOS HÍBRIDOS:
-    - ✅ Estructura LangGraph para el framework
-    - ✅ Decisiones autónomas de actores
-    - ✅ Router que RESPETA las señales de actores
-    - ✅ Sin bucles infinitos
-    
-    ROUTER INTELIGENTE:
-    - Los actores DECIDEN, el router solo EJECUTA
-    - Prioriza señales explícitas de actores
-    - Fallback inteligente sin bucles
-    """
-    
-    def __init__(self):
-        super().__init__("IncidenciaWorkflow")
-    
-    def _route_conversation(self, state: Dict[str, Any]) -> str:
-        """
-        🧠 ROUTER HÍBRIDO INTELIGENTE
-        
-        PRIORIDADES (en orden estricto):
-        1. 🎯 Decisión EXPLÍCITA del actor (máxima autoridad)
-        2. ⏸️ Interrupción para recopilar input del usuario
-        3. 🔼 Escalación solicitada
-        4. 🏁 Flujo marcado como completado  
-        5. ✅ Datos completos → continuar flujo
-        6. 🔄 Fallback inteligente
-        
-        CLAVE: El router NO toma decisiones de negocio,
-               solo INTERPRETA las señales de los actores.
-        """
-        
-        # 🎯 1. MÁXIMA PRIORIDAD: Decisión EXPLÍCITA del actor
-        next_actor = state.get("_next_actor")
-        if next_actor:
-            self.logger.info(f"🎯 ACTOR DECIDIÓ → {next_actor}")
-            # ✅ IMPORTANTE: Limpiar la señal para evitar loops
-            state["_next_actor"] = None
-            return next_actor
-        
-        # ⏸️ 2. INTERRUPCIÓN PARA RECOPILAR INPUT DEL USUARIO
-        if state.get("requires_user_input", False):
-            self.logger.info("⏸️ INPUT REQUERIDO → recopilar_input_usuario")
-            return "recopilar_input_usuario"
-        
-        # 🔄 3. CONTINUAR DESPUÉS DE RECOPILAR INPUT
-        workflow_state = state.get("workflow_state", {})
-        if workflow_state.get("input_processed", False):
-            resume_node = workflow_state.get("resume_node", "identificar_usuario")
-            self.logger.info(f"🔄 CONTINUAR DESPUÉS DE INPUT → {resume_node}")
-            return resume_node
-        
-        # 🔼 4. ESCALACIÓN solicitada por actor
-        if state.get("escalar_a_supervisor", False):
-            self.logger.info("🔼 ESCALACIÓN SOLICITADA → escalar_supervisor")
-            return "escalar_supervisor"
-        
-        # 🏁 5. FLUJO COMPLETADO por actor
-        if state.get("flujo_completado", False):
-            self.logger.info("🏁 FLUJO COMPLETADO → finalizar_ticket")
-            return "finalizar_ticket"
-        
-        # 📥 6. ACTOR NECESITA INPUT → verificar contexto
-        actor_decision = state.get("_actor_decision")
-        if actor_decision == "need_input":
-            self.logger.info("📥 ACTOR SOLICITA INPUT → mantener en actor actual")
-            # El actor maneja su propio input, no interrumpir
-            return self._get_current_actor_from_state(state)
-        
-        # ✅ 7. DATOS COMPLETOS → continuar flujo natural
-        datos_completos = state.get("datos_usuario_completos", False)
-        if datos_completos and not state.get("incidencia_resuelta", False):
-            self.logger.info("✅ DATOS COMPLETOS → procesar_incidencia")
-            return "procesar_incidencia"
-        
-        # 🔄 8. FALLBACK INTELIGENTE (sin bucles)
-        return self._intelligent_fallback_routing(state)
-    
-    def _intelligent_fallback_routing(self, state: Dict[str, Any]) -> str:
-        """
-        🧠 Fallback inteligente que evita bucles infinitos
-        
-        Analiza el estado y determina el próximo paso lógico
-        sin crear bucles.
-        """
-        
-        nombre = state.get("nombre")
-        email = state.get("email")
-        datos_completos = state.get("datos_usuario_completos", False)
-        incidencia_resuelta = state.get("incidencia_resuelta", False)
-        
-        # ✅ MANEJAR CONTEXTO DE INPUT
-        input_context = state.get("_input_context", {})
-        waiting_for = input_context.get("waiting_for", [])
-
-        if "nombre" in waiting_for or "email" in waiting_for:
-            self.logger.info("👤 FALLBACK: Esperando datos de usuario → identificar_usuario")
-            return "identificar_usuario"
-        
-        if "descripcion" in waiting_for or "problema" in waiting_for:
-            self.logger.info("🔧 FALLBACK: Esperando detalles de incidencia → procesar_incidencia")
-            return "procesar_incidencia"
-
-
-        # 👤 Si faltan datos básicos de usuario
-        if not datos_completos and (not nombre or not email):
-            self.logger.info(f"👤 FALLBACK: Datos incompletos (N:{bool(nombre)} E:{bool(email)}) → identificar_usuario")
-            return "identificar_usuario"
-        
-        # 🔧 Si tenemos usuario pero no incidencia procesada
-        if datos_completos and not incidencia_resuelta:
-            self.logger.info("🔧 FALLBACK: Usuario OK, procesar incidencia → procesar_incidencia")
-            return "procesar_incidencia"
-        
-        # ✅ Si todo está procesado
-        if datos_completos and incidencia_resuelta:
-            self.logger.info("✅ FALLBACK: Todo completo → finalizar_ticket")
-            return "finalizar_ticket"
-        
-        # 🆘 Último recurso: volver al inicio
-        self.logger.warning("🆘 FALLBACK: Estado indeterminado → identificar_usuario")
-        return "identificar_usuario"
-    
-    def _get_current_actor_from_state(self, state: Dict[str, Any]) -> str:
-
-# =====================================================
-# workflow/incidencia_workflow.py - ROUTER HÍBRIDO INTELIGENTE CORREGIDO
-# =====================================================
-from langgraph.graph import StateGraph, START, END
 from workflow.base_workflow import BaseWorkflow
 from models.state import GraphState
 from typing import Dict, Any
@@ -152,7 +19,7 @@ from nodes.identificar_usuario import identificar_usuario_node
 from nodes.procesar_incidencia import procesar_incidencia_node
 from nodes.escalar_supervisor import escalar_supervisor_node
 from nodes.finalizar_ticket import finalizar_ticket_node
-from nodes.recopilar_input_usuario import recopilar_input_usuario  # ✅ AGREGADO
+from nodes.recopilar_input_usuario import recopilar_input_usuario
 
 class IncidenciaWorkflow(BaseWorkflow):
     """
