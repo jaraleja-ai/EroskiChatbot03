@@ -1,5 +1,5 @@
 # =====================================================
-# nodes/base_node.py - Clase base para todos los nodos
+# nodes/base_node.py - HÍBRIDO: LangGraph + Actor Pattern
 # =====================================================
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, List
@@ -11,493 +11,297 @@ import asyncio
 
 from config.settings import get_settings
 
-class NodeExecutionResult:
-    """
-    Constantes para resultados de ejecución de nodos.
-    Estandariza los códigos de resultado para mejor control de flujo.
-    """
-    
-    # Resultados exitosos
-    SUCCESS = "success"
+class ActorDecision:
+    """Decisiones que puede tomar un actor"""
     CONTINUE = "continue"
-    REPEAT = "repeat"
-    
-    # Resultados que requieren acción del usuario
-    AWAIT_USER_INPUT = "await_input"
-    AWAIT_CONFIRMATION = "await_confirmation"
-    
-    # Resultados de control de flujo
+    COMPLETE = "complete" 
+    NEED_INPUT = "need_input"
     ESCALATE = "escalate"
-    REDIRECT = "redirect"
-    
-    # Resultados finales
-    COMPLETE = "complete"
-    ERROR = "error"
+    DELEGATE = "delegate"
 
 class BaseNode(ABC):
     """
-    Clase base abstracta para todos los nodos del grafo de LangGraph.
+    ✨ HÍBRIDO: Nodo base que combina LangGraph con principios de Actor Pattern
     
-    Proporciona funcionalidad común como:
-    - Logging estandarizado con contexto
-    - Validación automática de estado
-    - Manejo centralizado de errores
-    - Patrones de actualización consistentes
-    - Métricas y monitoreo básico
-    - Timeout management
+    PRINCIPIOS ACTOR:
+    - ✅ Autonomía: Cada nodo toma sus propias decisiones
+    - ✅ Encapsulación: Estado interno del nodo protegido
+    - ✅ Señalización: Comunica intenciones claramente al router
+    - ✅ Responsabilidad única: Cada nodo tiene una función específica
+    
+    COMPATIBILIDAD LANGGRAPH:
+    - ✅ Usa Command para actualizaciones de estado
+    - ✅ Compatible con el sistema de routing existente
+    - ✅ Mantiene el flujo de ejecución de LangGraph
     """
     
     def __init__(self, name: str, timeout_seconds: Optional[int] = None):
-        """
-        Inicializar nodo base.
-        
-        Args:
-            name: Nombre único del nodo
-            timeout_seconds: Timeout opcional para la ejecución del nodo
-        """
         self.name = name
-        self.logger = logging.getLogger(f"Node.{name}")
+        self.logger = logging.getLogger(f"Actor.{name}")
         self.settings = get_settings()
         self.timeout_seconds = timeout_seconds or 30
         
-        # Contadores para métricas
-        self._execution_count = 0
-        self._error_count = 0
-        self._last_execution_time = None
+        # 🎭 ESTADO INTERNO DEL ACTOR (encapsulado)
+        self._actor_state = {
+            "execution_count": 0,
+            "error_count": 0,
+            "last_execution_time": None,
+            "is_processing": False,
+            "decision_history": []
+        }
         
-        self.logger.debug(f"🔧 Nodo {name} inicializado")
+        self.logger.debug(f"🎭 Actor {name} inicializado")
+    
+    # =====================================================
+    # INTERFAZ LANGGRAPH (obligatoria)
+    # =====================================================
     
     @abstractmethod
     async def execute(self, state: Dict[str, Any]) -> Command:
         """
-        Lógica principal del nodo - debe ser implementada por cada nodo hijo.
+        Punto de entrada desde LangGraph - DEBE ser implementado.
         
-        Args:
-            state: Estado actual del grafo
-            
-        Returns:
-            Command: Comando con las actualizaciones del estado
-            
-        Raises:
-            NotImplementedError: Si no se implementa en la clase hija
+        Este método debe:
+        1. Analizar el estado recibido
+        2. Tomar decisiones autónomas
+        3. Retornar Command con señales claras para el router
         """
         pass
     
     @abstractmethod
     def get_required_fields(self) -> List[str]:
-        """
-        Campos requeridos en el estado para que este nodo funcione correctamente.
-        
-        Returns:
-            Lista de nombres de campos requeridos en el estado
-        """
+        """Campos requeridos en el estado para que funcione este actor"""
         pass
     
     @abstractmethod
-    def get_node_description(self) -> str:
-        """
-        Descripción del propósito y funcionamiento del nodo.
-        
-        Returns:
-            Descripción human-readable del nodo
-        """
+    def get_actor_description(self) -> str:
+        """Descripción de las responsabilidades de este actor"""
         pass
+    
+    # =====================================================
+    # MÉTODOS ACTOR PATTERN (mejores prácticas)
+    # =====================================================
+    
+    def signal_completion(
+        self, 
+        state: Dict[str, Any],
+        next_actor: str = None,
+        completion_message: str = None,
+        **actor_data
+    ) -> Command:
+        """
+        🎯 SEÑAL DE ACTOR: "He completado mi trabajo"
+        
+        El actor señala explícitamente que terminó y sugiere el próximo paso.
+        """
+        self._record_decision(ActorDecision.COMPLETE, next_actor)
+        
+        update_data = {
+            **actor_data,
+            "_actor_decision": ActorDecision.COMPLETE,
+            "_next_actor": next_actor,  # Señal explícita al router
+            "_completion_message": completion_message
+        }
+        
+        if completion_message:
+            update_data["messages"] = [AIMessage(content=completion_message)]
+        
+        self.logger.info(f"✅ {self.name} COMPLETO → señalando a {next_actor}")
+        return Command(update=update_data)
+    
+    def signal_need_input(
+        self, 
+        state: Dict[str, Any],
+        request_message: str,
+        context: Dict[str, Any] = None
+    ) -> Command:
+        """
+        🎯 SEÑAL DE ACTOR: "Necesito información del usuario"
+        
+        El actor solicita específicamente datos del usuario.
+        """
+        self._record_decision(ActorDecision.NEED_INPUT, "user")
+        
+        update_data = {
+            "_actor_decision": ActorDecision.NEED_INPUT,
+            "_request_message": request_message,
+            "_input_context": context or {},
+            "messages": [AIMessage(content=request_message)]
+        }
+        
+        self.logger.info(f"📥 {self.name} SOLICITA INPUT: {request_message[:50]}...")
+        return Command(update=update_data)
+    
+    def signal_delegation(
+        self, 
+        state: Dict[str, Any],
+        delegate_to: str,
+        delegation_reason: str = None,
+        **context_data
+    ) -> Command:
+        """
+        🎯 SEÑAL DE ACTOR: "Delego esta tarea a otro actor"
+        
+        El actor decide que otro actor debe manejar la situación.
+        """
+        self._record_decision(ActorDecision.DELEGATE, delegate_to)
+        
+        update_data = {
+            **context_data,
+            "_actor_decision": ActorDecision.DELEGATE,
+            "_next_actor": delegate_to,
+            "_delegation_reason": delegation_reason
+        }
+        
+        self.logger.info(f"🔄 {self.name} DELEGA → {delegate_to}: {delegation_reason}")
+        return Command(update=update_data)
+    
+    def signal_escalation(
+        self, 
+        state: Dict[str, Any],
+        reason: str,
+        attempts: int = 0,
+        **escalation_context
+    ) -> Command:
+        """
+        🎯 SEÑAL DE ACTOR: "Necesito escalación"
+        
+        El actor no puede completar su tarea y solicita ayuda.
+        """
+        self._record_decision(ActorDecision.ESCALATE, "supervisor")
+        
+        escalation_message = (
+            f"He intentado {reason} sin éxito después de {attempts} intentos. "
+            f"Voy a derivar tu consulta a un supervisor para que pueda ayudarte mejor."
+        )
+        
+        update_data = {
+            "_actor_decision": ActorDecision.ESCALATE,
+            "_next_actor": "escalar_supervisor",
+            "escalar_a_supervisor": True,
+            "razon_escalacion": reason,
+            "intentos": attempts,
+            "messages": [AIMessage(content=escalation_message)],
+            **escalation_context
+        }
+        
+        self.logger.warning(f"🔼 {self.name} ESCALA: {reason}")
+        return Command(update=update_data)
+    
+    # =====================================================
+    # UTILIDADES DE ACTOR (helpers)
+    # =====================================================
+    
+    def get_actor_state(self) -> Dict[str, Any]:
+        """Estado interno del actor (solo lectura)"""
+        return self._actor_state.copy()
+    
+    def increment_attempts(self, state: Dict[str, Any], attempt_key: str = "intentos") -> int:
+        """Incrementar intentos de manera consistente"""
+        current = state.get(attempt_key, 0)
+        new_attempts = current + 1
+        self._actor_state["execution_count"] += 1
+        self.logger.debug(f"🔄 Intento {new_attempts} para {attempt_key}")
+        return new_attempts
+    
+    def should_escalate_after_attempts(self, attempts: int, max_attempts: int = 3) -> bool:
+        """Determinar si debe escalar basado en intentos"""
+        return attempts >= max_attempts
+    
+    def get_last_user_message(self, state: Dict[str, Any]) -> str:
+        """Obtener último mensaje del usuario de forma segura"""
+        messages = state.get("messages", [])
+        for msg in reversed(messages):
+            if hasattr(msg, 'type') and msg.type == "human":
+                return msg.content
+            elif isinstance(msg, HumanMessage):
+                return msg.content
+        return ""
+    
+    def _record_decision(self, decision: str, target: str = None):
+        """Registrar decisión para debugging"""
+        decision_record = {
+            "decision": decision,
+            "target": target,
+            "timestamp": datetime.now().isoformat()
+        }
+        self._actor_state["decision_history"].append(decision_record)
+        
+        # Mantener solo las últimas 10 decisiones
+        if len(self._actor_state["decision_history"]) > 10:
+            self._actor_state["decision_history"] = self._actor_state["decision_history"][-10:]
     
     async def execute_with_monitoring(self, state: Dict[str, Any]) -> Command:
         """
-        Wrapper que ejecuta el nodo con monitoreo, timeout y manejo de errores.
+        Wrapper que ejecuta el actor con monitoreo.
         
-        Args:
-            state: Estado actual del grafo
-            
-        Returns:
-            Command con resultado de la ejecución
+        Agrega logging, métricas y manejo de errores común.
         """
         start_time = datetime.now()
-        self._execution_count += 1
+        self._actor_state["is_processing"] = True
         
         try:
-            self.log_execution_start(state)
+            self.logger.info(f"🔍 === INICIANDO {self.name.upper()} ===")
             
-            # Validar estado antes de ejecutar
-            if not self.validate_state(state):
-                return await self.handle_error(
-                    ValueError(f"Estado inválido para nodo {self.name}"), 
-                    state
+            # Validar campos requeridos
+            if not self._validate_required_fields(state):
+                return self.signal_escalation(
+                    state, 
+                    f"campos requeridos faltantes: {self.get_required_fields()}"
                 )
             
-            # Ejecutar con timeout
-            try:
-                result = await asyncio.wait_for(
-                    self.execute(state), 
-                    timeout=self.timeout_seconds
-                )
-            except asyncio.TimeoutError:
-                raise TimeoutError(f"Nodo {self.name} excedió timeout de {self.timeout_seconds}s")
+            # Ejecutar lógica del actor
+            result = await self.execute(state)
             
-            # Validar resultado
-            if not isinstance(result, Command):
-                raise ValueError(f"Nodo {self.name} debe retornar Command, retornó {type(result)}")
-            
+            # Registrar ejecución exitosa
             execution_time = (datetime.now() - start_time).total_seconds()
-            self._last_execution_time = execution_time
+            self._actor_state["last_execution_time"] = execution_time
             
-            self.log_execution_end(NodeExecutionResult.SUCCESS, execution_time)
+            self.logger.info(f"✅ {self.name} completado - Resultado: success ({execution_time:.2f}s)")
+            
+            if execution_time > 5.0:
+                self.logger.warning(f"⚠️ Ejecución lenta detectada: {execution_time:.2f}s")
+            
             return result
             
         except Exception as e:
-            self._error_count += 1
-            execution_time = (datetime.now() - start_time).total_seconds()
-            self.log_execution_end(NodeExecutionResult.ERROR, execution_time)
+            self._actor_state["error_count"] += 1
+            self.logger.error(f"❌ Error en {self.name}: {e}")
             return await self.handle_error(e, state)
+        
+        finally:
+            self._actor_state["is_processing"] = False
     
-    def validate_state(self, state: Dict[str, Any]) -> bool:
-        """
-        Validar que el estado tiene todos los campos requeridos.
+    def _validate_required_fields(self, state: Dict[str, Any]) -> bool:
+        """Validar que el estado tenga los campos requeridos"""
+        required = self.get_required_fields()
+        missing = [field for field in required if field not in state]
         
-        Args:
-            state: Estado a validar
-            
-        Returns:
-            True si el estado es válido, False en caso contrario
-        """
-        required_fields = self.get_required_fields()
-        missing_fields = []
-        
-        for field in required_fields:
-            if field not in state:
-                missing_fields.append(field)
-            elif state[field] is None and field in ["messages"]:  # Campos críticos
-                missing_fields.append(f"{field} (None)")
-        
-        if missing_fields:
-            self.logger.error(f"❌ Campos faltantes/inválidos: {missing_fields}")
+        if missing:
+            self.logger.warning(f"⚠️ Campos faltantes: {missing}")
             return False
         
-        self.logger.debug(f"✅ Estado válido para nodo {self.name}")
+        self.logger.debug("✅ Estado válido para actor")
         return True
     
-    def should_escalate(self, state: Dict[str, Any], field_name: str = "intentos") -> bool:
-        """
-        Determinar si el nodo debe escalar por múltiples intentos.
-        
-        Args:
-            state: Estado actual
-            field_name: Campo de intentos a verificar
-            
-        Returns:
-            True si debe escalar, False en caso contrario
-        """
-        current_attempts = state.get(field_name, 0)
-        max_attempts = self._get_max_attempts_for_field(field_name)
-        
-        should_escalate = current_attempts >= max_attempts
-        
-        if should_escalate:
-            self.logger.warning(
-                f"⚠️ Escalando por múltiples intentos: {current_attempts}/{max_attempts}"
-            )
-        
-        return should_escalate
-    
-    def _get_max_attempts_for_field(self, field_name: str) -> int:
-        """Obtener máximo de intentos según el campo"""
-        max_attempts_map = {
-            "intentos": self.settings.app.max_intentos_identificacion,
-            "intentos_incidencia": self.settings.app.max_intentos_incidencia,
-        }
-        return max_attempts_map.get(field_name, 5)
-    
-    def increment_attempts(self, state: Dict[str, Any], field_name: str = "intentos") -> int:
-        """
-        Incrementar contador de intentos.
-        
-        Args:
-            state: Estado actual
-            field_name: Campo de intentos a incrementar
-            
-        Returns:
-            Nuevo número de intentos
-        """
-        current_attempts = state.get(field_name, 0)
-        new_attempts = current_attempts + 1
-        self.logger.debug(f"🔄 Incrementando {field_name}: {new_attempts}")
-        return new_attempts
-    
-    def create_message_update(
-        self, 
-        content: str, 
-        additional_updates: Optional[Dict[str, Any]] = None,
-        message_type: str = "ai"
-    ) -> Dict[str, Any]:
-        """
-        Helper para crear actualizaciones con mensajes de forma consistente.
-        
-        Args:
-            content: Contenido del mensaje a agregar
-            additional_updates: Actualizaciones adicionales al estado
-            message_type: Tipo de mensaje ("ai" o "human")
-            
-        Returns:
-            Diccionario con la actualización completa
-        """
-        # Crear mensaje según el tipo
-        if message_type.lower() == "ai":
-            message = AIMessage(content=content)
-        else:
-            message = HumanMessage(content=content)
-        
-        update = {"messages": [message]}
-        
-        if additional_updates:
-            update.update(additional_updates)
-        
-        self.logger.debug(f"💬 Creando mensaje ({message_type}): {content[:50]}...")
-        return update
-    
     async def handle_error(self, error: Exception, state: Dict[str, Any]) -> Command:
-        """
-        Manejo centralizado de errores para todos los nodos.
+        """Manejo centralizado de errores"""
+        error_msg = f"Error en {self.name}: {str(error)}"
         
-        Args:
-            error: Excepción ocurrida
-            state: Estado actual cuando ocurrió el error
-            
-        Returns:
-            Command que escala a supervisor con información del error
-        """
-        error_id = f"{self.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        self.logger.error(
-            f"❌ Error en nodo {self.name} (ID: {error_id}): {error}", 
-            exc_info=True
-        )
-        
-        # Mensaje de error amigable para el usuario
-        if isinstance(error, TimeoutError):
-            error_message = (
-                "El procesamiento está tomando más tiempo del esperado. "
-                "Un supervisor revisará tu consulta para asegurar una respuesta rápida."
-            )
-        elif isinstance(error, ValueError):
-            error_message = (
-                "Hemos detectado un problema con la información proporcionada. "
-                "Un supervisor revisará tu caso para ayudarte mejor."
-            )
-        else:
-            error_message = (
-                "Ha ocurrido un error técnico inesperado. "
-                "Tu consulta será derivada a un supervisor para revisión inmediata."
+        # Si hay muchos errores, escalar
+        if self._actor_state["error_count"] >= 3:
+            return self.signal_escalation(
+                state,
+                f"múltiples errores en {self.name}",
+                attempts=self._actor_state["error_count"]
             )
         
-        return Command(update=self.create_message_update(
-            error_message,
-            {
-                "escalar_a_supervisor": True,
-                "razon_escalacion": f"Error técnico en {self.name}",
-                "error_info": {
-                    "error_id": error_id,
-                    "node": self.name,
-                    "error_type": type(error).__name__,
-                    "error_message": str(error),
-                    "timestamp": datetime.now().isoformat()
-                }
-            }
-        ))
-    
-    def log_execution_start(self, state: Dict[str, Any]):
-        """Log detallado del inicio de ejecución del nodo"""
-        messages_count = len(state.get("messages", []))
-        intentos = state.get("intentos", 0)
-        session_id = state.get("sesion_id", "unknown")
-        
-        self.logger.info(f"🔍 === INICIANDO {self.name.upper()} ===")
-        self.logger.info(f"📊 Sesión: {session_id}, Mensajes: {messages_count}, Intentos: {intentos}")
-        self.logger.debug(f"📋 Descripción: {self.get_node_description()}")
-    
-    def log_execution_end(self, result_type: str, execution_time: float):
-        """Log del final de ejecución del nodo"""
-        self.logger.info(
-            f"✅ {self.name} completado - Resultado: {result_type} "
-            f"({execution_time:.2f}s)"
-        )
-        
-        if execution_time > 5.0:  # Warn sobre ejecuciones lentas
-            self.logger.warning(f"⚠️ Ejecución lenta detectada: {execution_time:.2f}s")
-    
-    def get_last_user_message(self, state: Dict[str, Any]) -> str:
-        """
-        Obtener el último mensaje del usuario del estado.
-        
-        Args:
-            state: Estado actual del grafo
-            
-        Returns:
-            Contenido del último mensaje del usuario
-        """
-        try:
-            messages = state.get("messages", [])
-            
-            # Buscar el último mensaje humano en orden inverso
-            for message in reversed(messages):
-                # Verificar si es un mensaje humano (varios tipos posibles)
-                if hasattr(message, 'type') and message.type == "human":
-                    return message.content.strip()
-                elif hasattr(message, '__class__') and 'Human' in message.__class__.__name__:
-                    return message.content.strip()
-                elif str(type(message)) == "<class 'langchain_core.messages.human.HumanMessage'>":
-                    return message.content.strip()
-            
-            # Si no encontramos ningún mensaje humano
-            self.logger.warning("⚠️ No se encontró ningún mensaje del usuario")
-            return ""
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error obteniendo último mensaje del usuario: {e}")
-            return ""
-    
-    def get_conversation_context(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Extraer contexto relevante de la conversación.
-        
-        Args:
-            state: Estado actual
-            
-        Returns:
-            Diccionario con contexto relevante
-        """
-        messages = state.get("messages", [])
-        
-        return {
-            "total_messages": len(messages),
-            "user_messages": len([m for m in messages if isinstance(m, HumanMessage)]),
-            "ai_messages": len([m for m in messages if isinstance(m, AIMessage)]),
-            "last_user_message": self.get_last_user_message(state),
-            "conversation_length": sum(len(m.content) for m in messages),
-            "session_id": state.get("sesion_id"),
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    def transition_to(self, state: Dict[str, Any], next_step: str, awaiting_input: bool = False, **updates) -> Command:
-        """
-        Helper para crear transiciones limpias entre pasos del workflow.
-        
-        Args:
-            state: Estado actual del grafo
-            next_step: Paso siguiente del workflow
-            awaiting_input: Si el nodo debe esperar input del usuario
-            **updates: Actualizaciones adicionales al estado
-            
-        Returns:
-            Command con la transición configurada
-        """
-        update_data = {
-            "current_step": next_step,
-            "awaiting_input": awaiting_input,
-            "flow_history": self._get_updated_history(state, next_step),
-            **updates
-        }
-        
-        self.logger.info(f"🔄 Transición: {self.name} → {next_step}")
-        if awaiting_input:
-            self.logger.debug(f"⏸️ Esperando input del usuario en paso: {next_step}")
-        
-        return Command(update=update_data)
-
-    def wait_for_input(self, state: Dict[str, Any], next_step: str, message: str, next_action: str = None) -> Command:
-        """
-        Helper para esperar input del usuario con mensaje específico.
-        
-        Args:
-            state: Estado actual del grafo
-            next_step: Paso del workflow donde esperar
-            message: Mensaje a mostrar al usuario
-            next_action: Acción específica a realizar con la respuesta
-            
-        Returns:
-            Command configurado para esperar input
-        """
-        return self.transition_to(
-            state=state,
-            next_step=next_step,
-            awaiting_input=True,
-            messages=[AIMessage(content=message)],
-            next_action=next_action or f"process_{next_step}"
-        )
-
-    def _get_updated_history(self, state: Dict[str, Any], step: str) -> List[str]:
-        """
-        Actualizar historial de flujo del workflow.
-        
-        Args:
-            state: Estado actual que contiene el historial
-            step: Nuevo paso a agregar al historial
-            
-        Returns:
-            Lista actualizada del historial de pasos
-        """
-        current_history = state.get("flow_history", [])
-        return current_history + [step]
-
-    def create_escalation_command(
-        self, 
-        state: Dict[str, Any], 
-        reason: str, 
-        attempts: int,
-        additional_context: Optional[Dict[str, Any]] = None
-    ) -> Command:
-        """
-        Crear comando de escalación estandarizado.
-        
-        Args:
-            state: Estado actual
-            reason: Razón de la escalación
-            attempts: Número de intentos realizados
-            additional_context: Contexto adicional para la escalación
-            
-        Returns:
-            Command para escalar a supervisor
-        """
-        mensaje_escalacion = (
-            f"He intentado {reason} sin éxito después de {attempts} intentos. "
-            f"Voy a derivar tu consulta a un supervisor para que pueda ayudarte mejor. "
-            f"Un momento, por favor... 🔄"
-        )
-        
-        escalation_context = {
-            "node_origin": self.name,
-            "reason": reason,
-            "attempts": attempts,
-            "conversation_context": self.get_conversation_context(state)
-        }
-        
-        if additional_context:
-            escalation_context.update(additional_context)
-        
-        return Command(update=self.create_message_update(
-            mensaje_escalacion,
-            {
-                "intentos": attempts,
-                "escalar_a_supervisor": True,
-                "razon_escalacion": reason,
-                "contexto_escalacion": escalation_context
-            }
-        ))
-    
-    def get_execution_metrics(self) -> Dict[str, Any]:
-        """
-        Obtener métricas de ejecución del nodo.
-        
-        Returns:
-            Diccionario con métricas del nodo
-        """
-        return {
-            "node_name": self.name,
-            "execution_count": self._execution_count,
-            "error_count": self._error_count,
-            "error_rate": self._error_count / max(self._execution_count, 1),
-            "last_execution_time": self._last_execution_time,
-            "timeout_seconds": self.timeout_seconds
-        }
-
-
+        # Intentar recuperación
+        return Command(update={
+            "error_info": {
+                "actor": self.name,
+                "error": str(error),
+                "timestamp": datetime.now().isoformat()
+            },
+            "messages": [AIMessage(content="Disculpa, tuve un problema técnico. ¿Podrías intentar de nuevo?")]
+        })
