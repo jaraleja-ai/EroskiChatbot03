@@ -52,7 +52,7 @@ class ChatbotSession:
         # ✅ CONFIGURACIÓN DE ESTADO PERSISTENTE
         self.config = {
             "configurable": {"thread_id": self.thread_id},
-            "recursion_limit": 100  # Límite de recursión
+            "recursion_limit": 10  # Límite de recursión
         }
         
         # Estado de la sesión
@@ -274,9 +274,9 @@ class ChatbotSession:
                 self.graph_state = self._preserve_user_data_in_state(self.graph_state)
             
             # ✅ EJECUTAR CON CONFIGURACIÓN PERSISTENTE
-            result = await self.current_graph.ainvoke(
-                self.graph_state, 
-                config=self.config  # ✅ USAR CONFIG CON THREAD_ID
+            result = await asyncio.wait_for(
+                self.current_graph.ainvoke(self.graph_state, config=self.config),
+                timeout=30.0
             )
             
             # ✅ EXTRAER Y GUARDAR DATOS DE USUARIO
@@ -298,9 +298,13 @@ class ChatbotSession:
             
             return responses
             
+        except asyncio.TimeoutError:
+            self.logger.error("⏰ TIMEOUT: Ejecución cancelada por tiempo límite")
+            return ["He detectado un problema técnico. Por favor, intenta de nuevo o contacta a soporte."]
+        
         except Exception as e:
-            self.logger.error(f"❌ Error en ejecución del grafo: {e}")
-            raise
+            self.logger.error(f"❌ Error: {e}")
+            return ["Ha ocurrido un error. Por favor, intenta de nuevo."]
     
     async def _process_graph_result(self, result: Dict[str, Any]) -> List[str]:
         """Procesar el resultado completo del grafo"""

@@ -85,69 +85,52 @@ class IncidenciaWorkflow(BaseWorkflow):
         return graph
     
     def _route_conversation(self, state: Dict[str, Any]) -> str:
-        """
-        🧠 ROUTER HÍBRIDO INTELIGENTE
+        """Router híbrido con protección contra bucles"""
         
-        PRIORIDADES (en orden estricto):
-        1. 🎯 Decisión EXPLÍCITA del actor (máxima autoridad)
-        2. ⏸️ Interrupción para recopilar input del usuario
-        3. 🔄 Continuar después de recopilar input
-        4. 🔼 Escalación solicitada
-        5. 🏁 Flujo marcado como completado  
-        6. 📥 Actor necesita input → verificar contexto
-        7. ✅ Datos completos → continuar flujo
-        8. 🔄 Fallback inteligente
+        # 🛑 DETECTAR BUCLES EN EL ROUTER
+        execution_count = state.get("_execution_count", 0)
+        if execution_count > 5:
+            self.logger.warning(f"🛑 ROUTER: Bucle detectado ({execution_count} ejecuciones)")
+            return "escalar_supervisor"
         
-        CLAVE: El router NO toma decisiones de negocio,
-               solo INTERPRETA las señales de los actores.
-        """
-        
-        # 🎯 1. MÁXIMA PRIORIDAD: Decisión EXPLÍCITA del actor
+        # 🎯 1. DECISIÓN EXPLÍCITA DEL ACTOR
         next_actor = state.get("_next_actor")
         if next_actor:
             self.logger.info(f"🎯 ACTOR DECIDIÓ → {next_actor}")
-            # ✅ IMPORTANTE: Limpiar la señal para evitar loops
-            state["_next_actor"] = None
+            state["_next_actor"] = None  # Limpiar
             return next_actor
         
-        # ⏸️ 2. INTERRUPCIÓN PARA RECOPILAR INPUT DEL USUARIO
-        if state.get("requires_user_input", False):
-            self.logger.info("⏸️ INPUT REQUERIDO → recopilar_input_usuario")
-            return "recopilar_input_usuario"
-        
-        # 🔄 3. CONTINUAR DESPUÉS DE RECOPILAR INPUT
-        workflow_state = state.get("workflow_state", {})
-        if workflow_state.get("input_processed", False):
-            resume_node = workflow_state.get("resume_node", "identificar_usuario")
-            self.logger.info(f"🔄 CONTINUAR DESPUÉS DE INPUT → {resume_node}")
-            return resume_node
-        
-        # 🔼 4. ESCALACIÓN solicitada por actor
+        # 🔼 2. ESCALACIÓN SOLICITADA
         if state.get("escalar_a_supervisor", False):
-            self.logger.info("🔼 ESCALACIÓN SOLICITADA → escalar_supervisor")
+            self.logger.info("🔼 ESCALACIÓN → escalar_supervisor")
             return "escalar_supervisor"
         
-        # 🏁 5. FLUJO COMPLETADO por actor
+        # 🏁 3. FLUJO COMPLETADO
         if state.get("flujo_completado", False):
             self.logger.info("🏁 FLUJO COMPLETADO → finalizar_ticket")
             return "finalizar_ticket"
         
-        # 📥 6. ACTOR NECESITA INPUT → verificar contexto
-        actor_decision = state.get("_actor_decision")
-        if actor_decision == "need_input":
-            self.logger.info("📥 ACTOR SOLICITA INPUT → mantener en actor actual")
-            # El actor maneja su propio input, no interrumpir
-            return self._get_current_actor_from_state(state)
-        
-        # ✅ 7. DATOS COMPLETOS → continuar flujo natural
-        datos_completos = state.get("datos_usuario_completos", False)
-        if datos_completos and not state.get("incidencia_resuelta", False):
+        # ✅ 4. DATOS COMPLETOS
+        if state.get("datos_usuario_completos", False):
             self.logger.info("✅ DATOS COMPLETOS → procesar_incidencia")
             return "procesar_incidencia"
         
-        # 🔄 8. FALLBACK INTELIGENTE (sin bucles)
-        return self._intelligent_fallback_routing(state)
-    
+        # 🔄 5. DEFAULT CON PROTECCIÓN
+        nombre = state.get("nombre")
+        email = state.get("email")
+        
+        if not nombre or not email:
+            # Solo si no hemos intentado muchas veces
+            if execution_count < 3:
+                self.logger.info("👤 FALLBACK → identificar_usuario")
+                return "identificar_usuario"
+            else:
+                self.logger.warning("🛑 DEMASIADOS INTENTOS → escalar_supervisor")
+                return "escalar_supervisor"
+        
+        # Default
+        return "identificar_usuario"
+
     def _intelligent_fallback_routing(self, state: Dict[str, Any]) -> str:
         """
         🧠 Fallback inteligente que evita bucles infinitos
