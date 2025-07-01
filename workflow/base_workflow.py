@@ -139,7 +139,7 @@ class BaseWorkflow(ABC):
         Returns:
             Lista de nombres de nodos donde interrumpir
         """
-        return []
+        return ["recopilar_input_usuario"]
     
     def add_conditional_edges(
         self, 

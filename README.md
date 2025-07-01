@@ -193,7 +193,7 @@ pytest -k "test_user"
 
 ```python
 # nodes/mi_nuevo_nodo.py
-from .base_node import BaseNode, NodeExecutionResult
+from .base_node import BaseNode 
 
 class MiNuevoNodo(BaseNode):
     def __init__(self):

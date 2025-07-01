@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional, List
 from langchain_core.messages import AIMessage
 from langgraph.types import Command
 
-from .base_node import BaseNode, NodeExecutionResult
+from .base_node import BaseNode
 from utils import generate_natural_message
 
 class RecopilarInputUsuarioNode(BaseNode):

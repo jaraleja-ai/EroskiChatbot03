@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage
 from langgraph.types import Command
 
 
-from .base_node import BaseNode, NodeExecutionResult
+from .base_node import BaseNode 
 from utils.extractors.incident_extractor import extraer_tipo_incidencia, extraer_detalles_incidencia
 from utils.llm.message_generator import generate_natural_message, generate_followup_questions
 from models.incidencia import TipoIncidencia, CategoriaIncidencia, PrioridadIncidencia
