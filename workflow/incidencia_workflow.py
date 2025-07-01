@@ -1,20 +1,12 @@
 # =====================================================
-# workflow/incidencia_workflow.py - ROUTER HÍBRIDO INTELIGENTE
+# workflow/incidencia_workflow.py - ROUTER HÍBRIDO INTELIGENTE CORREGIDO
 # =====================================================
-from nodes.identificar_usuario import identificar_usuario_node
-from nodes.procesar_incidencia import procesar_incidencia_node
-from nodes.escalar_supervisor import escalar_supervisor_node
-from nodes.finalizar_ticket import finalizar_ticket_node
-from nodes.recopilar_input_usuario import recopilar_input_usuario  # ✅ AGREGADO
 from langgraph.graph import StateGraph, START, END
-from workflow import BaseWorkflow
-from models import GraphState
-from typing import Dict, Any
 from workflow.base_workflow import BaseWorkflow
 from models.state import GraphState
 from typing import Dict, Any
 
-# ✅ IMPORTS CORREGIDOS - TODOS LOS NODOS NECESARIOS
+# ✅ IMPORTS LIMPIOS - SIN DUPLICACIONES
 from nodes.identificar_usuario import identificar_usuario_node
 from nodes.procesar_incidencia import procesar_incidencia_node
 from nodes.escalar_supervisor import escalar_supervisor_node
@@ -54,7 +46,7 @@ class IncidenciaWorkflow(BaseWorkflow):
         graph.add_node("procesar_incidencia", procesar_incidencia_node) 
         graph.add_node("escalar_supervisor", escalar_supervisor_node)
         graph.add_node("finalizar_ticket", finalizar_ticket_node)
-        graph.add_node("recopilar_input_usuario", recopilar_input_usuario)  # ✅ AGREGADO
+        graph.add_node("recopilar_input_usuario", recopilar_input_usuario)
         
         # Punto de entrada
         graph.add_edge(START, "identificar_usuario")
@@ -65,7 +57,7 @@ class IncidenciaWorkflow(BaseWorkflow):
             "procesar_incidencia": "procesar_incidencia",
             "escalar_supervisor": "escalar_supervisor", 
             "finalizar_ticket": "finalizar_ticket",
-            "recopilar_input_usuario": "recopilar_input_usuario",  # ✅ AGREGADO
+            "recopilar_input_usuario": "recopilar_input_usuario",
             END: END
         }
         
@@ -73,7 +65,7 @@ class IncidenciaWorkflow(BaseWorkflow):
         decision_actors = [
             "identificar_usuario", 
             "procesar_incidencia", 
-            "recopilar_input_usuario"  # ✅ AGREGADO
+            "recopilar_input_usuario"
         ]
         
         for actor_name in decision_actors:
@@ -85,7 +77,7 @@ class IncidenciaWorkflow(BaseWorkflow):
             )
             self.logger.debug(f"🔀 Routing híbrido configurado para {actor_name}")
         
-        # ✅ EDGES DIRECTOS (sin decisiones) PARA NODOS FINALES
+        # ✅ EDGES DIRECTOS PARA NODOS FINALES
         graph.add_edge("escalar_supervisor", END)
         graph.add_edge("finalizar_ticket", END)
         
@@ -99,10 +91,12 @@ class IncidenciaWorkflow(BaseWorkflow):
         PRIORIDADES (en orden estricto):
         1. 🎯 Decisión EXPLÍCITA del actor (máxima autoridad)
         2. ⏸️ Interrupción para recopilar input del usuario
-        3. 🔼 Escalación solicitada
-        4. 🏁 Flujo marcado como completado  
-        5. ✅ Datos completos → continuar flujo
-        6. 🔄 Fallback inteligente
+        3. 🔄 Continuar después de recopilar input
+        4. 🔼 Escalación solicitada
+        5. 🏁 Flujo marcado como completado  
+        6. 📥 Actor necesita input → verificar contexto
+        7. ✅ Datos completos → continuar flujo
+        8. 🔄 Fallback inteligente
         
         CLAVE: El router NO toma decisiones de negocio,
                solo INTERPRETA las señales de los actores.
@@ -255,58 +249,6 @@ class IncidenciaWorkflow(BaseWorkflow):
             "mediante señalización clara entre actores autónomos y maneja "
             "interrupciones para recopilar input del usuario"
         )
-
-    def build_graph(self) -> StateGraph:
-        """Construir grafo híbrido con routing inteligente"""
-        
-        self.logger.info("🔧 Construyendo grafo híbrido...")
-        
-        # Crear grafo con el estado
-        graph = StateGraph(GraphState)
-        
-        # Agregar nodos/actores
-        graph.add_node("identificar_usuario", identificar_usuario_node)
-        graph.add_node("procesar_incidencia", procesar_incidencia_node) 
-        graph.add_node("escalar_supervisor", escalar_supervisor_node)
-        graph.add_node("finalizar_ticket", finalizar_ticket_node)
-        graph.add_node("recopilar_input_usuario", recopilar_input_usuario)  # ✅ AGREGADO
-        
-        # Punto de entrada
-        graph.add_edge(START, "identificar_usuario")
-        
-        # ===== ROUTING HÍBRIDO =====
-        # Router inteligente que respeta decisiones de actores
-        routing_destinations = {
-            "identificar_usuario": "identificar_usuario",
-            "procesar_incidencia": "procesar_incidencia",
-            "escalar_supervisor": "escalar_supervisor", 
-            "finalizar_ticket": "finalizar_ticket",
-            "recopilar_input_usuario": "recopilar_input_usuario",
-            END: END
-        }
-        
-        # Aplicar routing inteligente a actores principales
-        decision_actors = [
-            "identificar_usuario", 
-            "procesar_incidencia",
-            "recopilar_input_usuario"
-            ]
-        
-        for actor_name in decision_actors:
-            self.add_conditional_edges(
-                graph,
-                actor_name,
-                self._route_conversation,
-                routing_destinations
-            )
-            self.logger.debug(f"🔀 Routing híbrido configurado para {actor_name}")
-        
-        # ✅ EDGES DIRECTOS (sin decisiones) PARA NODOS FINALES
-        graph.add_edge("escalar_supervisor", END)
-        graph.add_edge("finalizar_ticket", END)
-        
-        self.logger.info("✅ Grafo híbrido construido exitosamente")
-        return graph
     
     def _cleanup_actor_signals(self, state: Dict[str, Any]):
         """
@@ -327,3 +269,10 @@ class IncidenciaWorkflow(BaseWorkflow):
         for signal in signals_to_clean:
             if signal in state:
                 del state[signal]
+    
+    # ✅ SOBRESCRIBIR MÉTODO DE INTERRUPCIONES
+    def _get_interrupt_nodes(self) -> list[str]:
+        """
+        Nodos donde interrumpir para recopilar input del usuario.
+        """
+        return ["recopilar_input_usuario"]
