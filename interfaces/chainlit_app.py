@@ -231,7 +231,8 @@ class ChatbotSession:
             self.logger.error(f"❌ Error iniciando nuevo flujo: {e}")
             raise
     
-    # ✅ MODIFICAR MÉTODO EXISTENTE
+# En interfaces/chainlit_app.py - MODIFICAR método existente
+
     async def _continue_interrupted_flow(self) -> List[str]:
         """Continuar un flujo que fue interrumpido"""
         try:
@@ -241,71 +242,94 @@ class ChatbotSession:
             if self.graph_state:
                 self.graph_state = self._preserve_user_data_in_state(self.graph_state)
             
+            # Limpiar flags de interrupción
+            self.graph_state.update({
+                "waiting_for_new_input": False,
+                "requires_user_input": False,
+                "pending_user_input": False
+            })
+            
             # Marcar que ya no estamos esperando input
             self.pending_user_input = False
             
-            # ✅ CONTINUAR CON CONFIGURACIÓN PERSISTENTE (SIN ESTADO INICIAL)
-            result = await self.current_graph.ainvoke(
-                None,  # ✅ NO pasar estado, usar el persistido
-                config=self.config
-            )
-            
-            # ✅ EXTRAER Y GUARDAR DATOS
-            self._extract_and_save_user_data(result)
-            
-            # Procesar resultado
-            return await self._process_graph_result(result)
+            # ✅ CONTINUAR CON EJECUCIÓN STEP-BY-STEP
+            return await self._execute_graph_invoke()
             
         except Exception as e:
             self.logger.error(f"❌ Error continuando flujo interrumpido: {e}")
             raise
-    # ✅ MODIFICAR MÉTODO EXISTENTE
+
+    # En interfaces/chainlit_app.py - MODIFICAR método existente
     async def _execute_graph_invoke(self) -> List[str]:
         """
-        Ejecutar grafo usando ainvoke con configuración persistente.
+        Ejecutar grafo usando ainvoke con ejecución step-by-step.
         """
         responses = []
         
         try:
-            self.logger.info("🚀 Ejecutando grafo con ainvoke...")
+            self.logger.info("🚀 Ejecutando grafo step-by-step...")
             
             # ✅ PRESERVAR DATOS ANTES DE EJECUTAR
             if self.graph_state:
                 self.graph_state = self._preserve_user_data_in_state(self.graph_state)
             
-            # ✅ EJECUTAR CON CONFIGURACIÓN PERSISTENTE
-            result = await asyncio.wait_for(
-                self.current_graph.ainvoke(self.graph_state, config=self.config),
-                timeout=30.0
-            )
+            # 🔄 EJECUCIÓN STEP-BY-STEP
+            current_state = self.graph_state
+            max_steps = 5  # Límite de pasos para evitar bucles infinitos
+            step_count = 0
             
-            # ✅ EXTRAER Y GUARDAR DATOS DE USUARIO
-            self._extract_and_save_user_data(result)
+            while step_count < max_steps:
+                step_count += 1
+                self.logger.info(f"🔄 === PASO {step_count} ===")
+                
+                # Ejecutar UN paso del grafo
+                result = await asyncio.wait_for(
+                    self.current_graph.ainvoke(current_state, config=self.config),
+                    timeout=30.0
+                )
+                
+                self.logger.info(f"📊 Estado tras paso {step_count}:")
+                self.logger.info(f"   - _next_actor: {result.get('_next_actor')}")
+                self.logger.info(f"   - datos_usuario_completos: {result.get('datos_usuario_completos')}")
+                self.logger.info(f"   - flujo_completado: {result.get('flujo_completado')}")
+                
+                # ✅ EXTRAER MENSAJES DEL PASO ACTUAL
+                step_messages = self._extract_messages_from_step(result, current_state)
+                if step_messages:
+                    responses.extend(step_messages)
+                
+                # ✅ VERIFICAR CONDICIONES DE PARADA
+                stop_reason = self._should_stop_execution(result, step_count)
+                if stop_reason:
+                    self.logger.info(f"🛑 Deteniendo ejecución: {stop_reason}")
+                    break
+                
+                # ✅ ACTUALIZAR ESTADO PARA SIGUIENTE PASO
+                current_state = result
+                
+                # ✅ EXTRAER Y GUARDAR DATOS DE USUARIO
+                self._extract_and_save_user_data(result)
             
-            # Verificar si el resultado indica una interrupción
-            if self._is_interrupted_result(result):
+            # ✅ VERIFICAR SI NECESITA INTERRUPCIÓN FINAL
+            if self._is_interrupted_result(current_state):
                 self.logger.info("⏸️ Flujo interrumpido - esperando input del usuario")
                 self.is_interrupted = True
                 self.pending_user_input = True
                 self.interruption_count += 1
-                
-                # Obtener mensajes hasta el punto de interrupción
-                responses = await self._extract_messages_before_interruption(result.get("messages", []))
-                return responses
             
-            # Procesar resultado normal
-            responses = await self._process_graph_result(result)
+            # ✅ GUARDAR ESTADO FINAL
+            self.graph_state = current_state
             
-            return responses
+            return responses if responses else ["¿En qué puedo ayudarte?"]
             
         except asyncio.TimeoutError:
             self.logger.error("⏰ TIMEOUT: Ejecución cancelada por tiempo límite")
-            return ["He detectado un problema técnico. Por favor, intenta de nuevo o contacta a soporte."]
+            return ["He detectado un problema técnico. Por favor, intenta de nuevo."]
         
         except Exception as e:
             self.logger.error(f"❌ Error: {e}")
-            return ["Ha ocurrido un error. Por favor, intenta de nuevo."]
-    
+        return ["Ha ocurrido un error. Por favor, intenta de nuevo."]
+
     async def _process_graph_result(self, result: Dict[str, Any]) -> List[str]:
         """Procesar el resultado completo del grafo"""
         responses = []
@@ -403,6 +427,56 @@ class ChatbotSession:
             self.logger.error(f"❌ Error extrayendo mensajes antes de interrupción: {e}")
             return ["Hubo un problema procesando tu solicitud. ¿Puedes proporcionar más detalles?"]
     
+# En interfaces/chainlit_app.py - AGREGAR métodos helper
+
+    def _extract_messages_from_step(self, result: Dict[str, Any], previous_state: Dict[str, Any]) -> List[str]:
+        """Extraer solo los mensajes NUEVOS de este paso"""
+        
+        current_messages = result.get("messages", [])
+        previous_messages = previous_state.get("messages", [])
+        
+        # Encontrar mensajes nuevos
+        new_messages = current_messages[len(previous_messages):]
+        
+        # Extraer solo mensajes de AI (respuestas del bot)
+        ai_messages = []
+        for msg in new_messages:
+            if hasattr(msg, 'type') and msg.type == 'ai':
+                ai_messages.append(msg.content)
+            elif isinstance(msg, dict) and msg.get('type') == 'ai':
+                ai_messages.append(msg.get('content', ''))
+        
+        return ai_messages
+
+    def _should_stop_execution(self, result: Dict[str, Any], step_count: int) -> Optional[str]:
+        """Determinar si debe detenerse la ejecución"""
+        
+        # 1. Flujo completado
+        if result.get("flujo_completado", False):
+            return "flujo_completado"
+        
+        # 2. Escalación solicitada
+        if result.get("escalar_a_supervisor", False):
+            return "escalacion_solicitada"
+        
+        # 3. Necesita input del usuario
+        if result.get("requires_user_input", False) or result.get("pending_user_input", False):
+            return "requiere_input_usuario"
+        
+        # 4. Señal de interrupción
+        if result.get("waiting_for_new_input", False):
+            return "esperando_nuevo_input"
+        
+        # 5. Límite de pasos alcanzado
+        if step_count >= 5:
+            return "limite_pasos_alcanzado"
+        
+        # 6. No hay _next_actor definido (puede estar completado)
+        if not result.get("_next_actor") and result.get("datos_usuario_completos", False):
+            return "sin_siguiente_actor"
+        
+        return None  # Continuar ejecutando
+
     def _check_flow_completion(self, result: Dict[str, Any]):
         """Verificar si el flujo ha terminado"""
         self.conversation_complete = (

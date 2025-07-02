@@ -130,7 +130,6 @@ class BaseNode(ABC):
             "_input_context": context or {},
             "messages": [AIMessage(content=request_message)]
         }
-        
         self.logger.info(f"📥 {self.name} SOLICITA INPUT: {request_message[:50]}...")
         return Command(update=update_data)
     
@@ -163,7 +162,6 @@ class BaseNode(ABC):
         self, 
         state: Dict[str, Any],
         reason: str,
-        attempts: int = 0,
         **escalation_context
     ) -> Command:
         """
@@ -171,19 +169,23 @@ class BaseNode(ABC):
         
         El actor no puede completar su tarea y solicita ayuda.
         """
+        attempts = state["intentos"]
         self._record_decision(ActorDecision.ESCALATE, "supervisor")
         
         escalation_message = (
             f"He intentado {reason} sin éxito después de {attempts} intentos. "
             f"Voy a derivar tu consulta a un supervisor para que pueda ayudarte mejor."
         )
+
+        
         
         update_data = {
+            **state,
+            "intentos": attempts + 1,
             "_actor_decision": ActorDecision.ESCALATE,
             "_next_actor": "escalar_supervisor",
             "escalar_a_supervisor": True,
             "razon_escalacion": reason,
-            "intentos": attempts,
             "messages": [AIMessage(content=escalation_message)],
             **escalation_context
         }
