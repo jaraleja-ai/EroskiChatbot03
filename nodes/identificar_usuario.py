@@ -92,7 +92,13 @@ class IdentificarUsuarioNode(BaseNode):
             return self.signal_escalation(state, "obtener datos de usuario")
         
         # ✅ DECISIÓN 3: Procesar input
+        print('🛑'*50)
+        print("Procesando input del usuario...")
+        # ⚠️ PROCESAR INPUT DEL USUARIO
         vuelta = await self._process_user_input(state)
+        print('🛑'*50)
+        print(f"vuelta: {vuelta}")
+
         return vuelta
 
 #----------------------------------
@@ -210,6 +216,8 @@ class IdentificarUsuarioNode(BaseNode):
         """🎯 DECISIÓN DEL ACTOR: Solicitar ambos datos"""
 
         if intentos == 1:
+            print('🛑'*50)
+            print('imprime el mensaje y va a signal need input')
             mensaje = (
                 "¡Hola! Para ayudarte mejor, necesito que me proporciones:\n"
                 "👤 **Tu nombre completo**\n"

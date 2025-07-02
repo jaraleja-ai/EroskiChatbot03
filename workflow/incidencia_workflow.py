@@ -101,7 +101,7 @@ class IncidenciaWorkflow(BaseWorkflow):
         # 🔍 TEST: Forzar interrupción si hay _request_message
         if state.get("_request_message"):
             print("🟡 FORZANDO INTERRUPCIÓN POR _request_message")
-            return "__interrupt__"
+            return "recopilar_input_usuario"
 
         # 🔍 DEBUG COMPLETO DEL ESTADO
         self.logger.info("=" * 50)
@@ -120,13 +120,13 @@ class IncidenciaWorkflow(BaseWorkflow):
     # 🔍 PRIORIDAD 1: Input del usuario necesario
         if state.get("requires_user_input", False):
             self.logger.info("📥 REQUIERE INPUT → detener flujo")
-            return "__interrupt__"
+            return "recopilar_input_usuario"
 
 
         # 📥 PRIORIDAD 1: Actor solicita input
         if state.get("_actor_decision") == "need_input":
-            self.logger.info("📥 ACTOR SOLICITA INPUT → __interrupt__")
-            return "__interrupt__"
+            self.logger.info("📥 ACTOR SOLICITA INPUT → recopilar_input_usuario")
+            return "recopilar_input_usuario"
         
         # 🎯 PRIORIDAD 2: Decisión explícita del actor
         next_actor = state.get("_next_actor")
