@@ -90,95 +90,98 @@ class IncidenciaWorkflow(BaseWorkflow):
         
         self.logger.info("✅ Grafo híbrido actualizado construido exitosamente")
         return graph
-    
+
+
     def _route_conversation(self, state: Dict[str, Any]) -> str:
         """
-        Router híbrido ACTUALIZADO que centraliza interrupciones en recopilar_input_usuario
+        🧠 ROUTER HÍBRIDO CORREGIDO - Lee señales de actores correctamente
         
-        PRIORIDADES (en orden):
-        1. ⏸️ INTERRUPCIONES → recopilar_input_usuario (centralizado)
-        2. 🎯 DECISIÓN EXPLÍCITA del actor → ejecutar
-        3. 🏁 FLUJO COMPLETADO → END
-        4. 🔼 ESCALACIÓN → escalar_supervisor
-        5. ✅ DATOS COMPLETOS → procesar_incidencia
-        6. 🔄 FALLBACK → identificar_usuario
-        
-        Args:
-            state: Estado actual del grafo
-            
-        Returns:
-            Nombre del próximo nodo a ejecutar
+        ORDEN DE PRIORIDADES:
+        1. Señales explícitas de actores (_actor_decision)
+        2. Estado awaiting_input (interrupciones)
+        3. Estado de datos del usuario
+        4. Escalación y finalización
+        5. Fallback inteligente con protección anti-bucle
         """
-
-        # 🔍 DEBUG COMPLETO AL INICIO
-        if self.logger.isEnabledFor(logging.DEBUG):
-            self.logger.debug("=" * 60)
-            self.logger.debug("🔍 ROUTER DEBUG - ESTADO COMPLETO:")
-            self.logger.debug(f"📥 _actor_decision: {state.get('_actor_decision')}")
-            self.logger.debug(f"📥 requires_user_input: {state.get('requires_user_input')}")
-            self.logger.debug(f"🎯 _next_actor: {state.get('_next_actor')}")
-            self.logger.debug(f"✅ datos_usuario_completos: {state.get('datos_usuario_completos')}")
-            self.logger.debug(f"👤 nombre: {state.get('nombre')}")
-            self.logger.debug(f"📧 email: {state.get('email')}")
-            self.logger.debug(f"🔄 execution_count: {state.get('_execution_count', 0)}")
-            self.logger.debug(f"🔼 escalar_a_supervisor: {state.get('escalar_a_supervisor')}")
-            self.logger.debug(f"🏁 flujo_completado: {state.get('flujo_completado')}")
-            self.logger.debug(f"⏸️ _request_message existe: {bool(state.get('_request_message'))}")
-            self.logger.debug(f"🔧 _input_context: {state.get('_input_context')}")
-            self.logger.debug("=" * 60)
-
-        # ⏸️ PRIORIDAD 1: CENTRALIZAR TODAS LAS INTERRUPCIONES EN recopilar_input_usuario
-        if (state.get("requires_user_input", False) or 
-            state.get("_actor_decision") == "need_input" or
-            state.get("awaiting_input", False) or
-            state.get("_request_message")):  # Si hay mensaje específico para el usuario
-            
-            self.logger.info("⏸️ NECESITA INPUT → recopilar_input_usuario")
-            return "recopilar_input_usuario"
         
-        # 🎯 PRIORIDAD 2: DECISIÓN EXPLÍCITA DEL ACTOR (señal directa)
+        # 🔍 DEBUG COMPLETO DEL ESTADO
+        self.logger.info("🔍 === ROUTER - ANÁLISIS DE ESTADO ===")
+        self.logger.info(f"📋 _actor_decision: {state.get('_actor_decision')}")
+        self.logger.info(f"🎯 _next_actor: {state.get('_next_actor')}")
+        self.logger.info(f"⏸️ awaiting_input: {state.get('awaiting_input', False)}")
+        self.logger.info(f"👤 datos_usuario_completos: {state.get('datos_usuario_completos', False)}")
+        self.logger.info(f"🔄 Execution count: {state.get('_execution_count', 0)}")
+        
+        # ⭐ PRIORIDAD 1: SEÑALES EXPLÍCITAS DE ACTORES
+        actor_decision = state.get("_actor_decision")
         next_actor = state.get("_next_actor")
-        if next_actor and next_actor in self.routing_destinations:
-            self.logger.info(f"🎯 Actor solicita explícitamente: {next_actor}")
+        
+        if actor_decision == "need_input" and next_actor:
+            self.logger.info(f"🎭 ACTOR SOLICITA INPUT → {next_actor}")
+            # Actualizar estado para indicar que esperamos input
+            return "__interrupt__"  # Usar interrupción de LangGraph
+        
+        if next_actor and actor_decision:
+            self.logger.info(f"🎭 ACTOR DECIDIÓ '{actor_decision}' → {next_actor}")
             return next_actor
         
-        # 🏁 PRIORIDAD 3: FLUJO COMPLETADO
-        if state.get("flujo_completado", False):
-            self.logger.info("🏁 FLUJO COMPLETADO → END")
-            return END
+        # ⏸️ PRIORIDAD 2: ESTADO AWAITING_INPUT
+        if state.get("awaiting_input", False):
+            self.logger.info("⏸️ ESPERANDO INPUT DEL USUARIO → __interrupt__")
+            return "__interrupt__"
         
-        # 🔼 PRIORIDAD 4: ESCALACIÓN A SUPERVISOR
+        # 🔼 PRIORIDAD 3: ESCALACIÓN SOLICITADA
         if state.get("escalar_a_supervisor", False):
             self.logger.info("🔼 ESCALACIÓN → escalar_supervisor")
             return "escalar_supervisor"
         
-        # ✅ PRIORIDAD 5: DATOS DE USUARIO COMPLETOS → PROCESAR INCIDENCIA
+        # 🏁 PRIORIDAD 4: FLUJO COMPLETADO
+        if state.get("flujo_completado", False):
+            self.logger.info("🏁 FLUJO COMPLETADO → finalizar_ticket")
+            return "finalizar_ticket"
+        
+        # ✅ PRIORIDAD 5: DATOS COMPLETOS
         if state.get("datos_usuario_completos", False):
-            # Verificar que realmente tengamos los datos
-            nombre = state.get("nombre")
-            email = state.get("email")
-            
-            if nombre and email:
-                self.logger.info("✅ DATOS COMPLETOS Y VERIFICADOS → procesar_incidencia")
+            incidencia_info = state.get("descripcion_incidencia")
+            if incidencia_info:
+                self.logger.info("✅ DATOS E INCIDENCIA COMPLETOS → procesar_incidencia")
                 return "procesar_incidencia"
             else:
-                self.logger.warning("⚠️ datos_usuario_completos=True pero faltan datos reales")
-                # Resetear flag incorrecto y volver a identificar
-                return "identificar_usuario"
+                self.logger.info("✅ DATOS COMPLETOS, FALTAN DETALLES → procesar_incidencia")
+                return "procesar_incidencia"
         
-        # 🔄 PRIORIDAD 6: FALLBACK INTELIGENTE
-        # Si no hay datos de usuario, volver a identificar
+        # 🛑 PRIORIDAD 6: PROTECCIÓN ANTI-BUCLE
+        execution_count = state.get("_execution_count", 0)
+        if execution_count > 10:  # Ajustar límite
+            self.logger.warning(f"🛑 BUCLE DETECTADO ({execution_count} ejecuciones) → escalar_supervisor")
+            return "escalar_supervisor"
+        
+        # 🔄 PRIORIDAD 7: ANÁLISIS DE DATOS DE USUARIO
         nombre = state.get("nombre")
         email = state.get("email")
         
+        # Si no tenemos datos de usuario básicos
         if not nombre or not email:
-            self.logger.info("🔄 FALTAN DATOS DE USUARIO → identificar_usuario")
+            if execution_count < 5:  # Reducir límite para identificación
+                self.logger.info(f"👤 FALTAN DATOS DE USUARIO (intento {execution_count}) → identificar_usuario")
+                # IMPORTANTE: Incrementar contador para evitar bucles
+                state["_execution_count"] = execution_count + 1
+                return "identificar_usuario"
+            else:
+                self.logger.warning(f"🛑 DEMASIADOS INTENTOS IDENTIFICANDO USUARIO → escalar_supervisor")
+                return "escalar_supervisor"
+        
+        # Si tenemos datos básicos pero no están marcados como completos
+        if nombre and email and not state.get("datos_usuario_completos", False):
+            self.logger.info("🔄 DATOS PRESENTES PERO NO VALIDADOS → identificar_usuario")
             return "identificar_usuario"
         
-        # Si tenemos datos pero no están marcados como completos, procesar
-        self.logger.info("🔄 DATOS DISPONIBLES PERO NO MARCADOS COMPLETOS → procesar_incidencia")
+        # 🎯 DEFAULT FINAL: Procesar incidencia
+        self.logger.info("🎯 DEFAULT → procesar_incidencia")
         return "procesar_incidencia"
-    
+
+
+
     def add_conditional_edges(self, graph: StateGraph, source: str, condition_func, path_map: Dict[str, str]):
         """
         Helper para agregar edges condicionales de forma consistente
