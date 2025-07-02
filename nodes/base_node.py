@@ -130,6 +130,7 @@ class BaseNode(ABC):
             "_input_context": context or {},
             "messages": [AIMessage(content=request_message)]
         }
+        print(f'🛑🛑 signal_need_input, actor_decision: {update_data["_actor_decision"]}')
         self.logger.info(f"📥 {self.name} SOLICITA INPUT: {request_message[:50]}...")
         return Command(update=update_data)
     
