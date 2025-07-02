@@ -160,7 +160,7 @@ class BaseNode(ABC):
         self.logger.info(f"🔄 {self.name} DELEGA → {delegate_to}: {delegation_reason}")
         return new_state
     
-    def get_state_diff(old_state: dict, new_state: Optional[Dict[str, Any]] = None) -> dict:
+    def get_state_diff(self, old_state: dict, new_state: dict) -> dict:
         """
         Compara old_state y new_state y devuelve un dict con solo las claves
         que son nuevas o cuyo valor cambió.

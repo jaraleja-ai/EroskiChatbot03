@@ -83,16 +83,16 @@ class BaseWorkflow(ABC):
             graph = self.build_graph()
             
             # ✅ CONFIGURAR INTERRUPCIONES PARA RECOPILAR INPUT
-            interrupt_before = ["recopilar_input_usuario"]  # Nodo donde interrumpir
+            interrupt_after = ["recopilar_input_usuario"]  # Nodo donde interrumpir
             
             # ✅ COMPILAR CON CHECKPOINTER E INTERRUPCIONES
             self._graph = graph.compile(
                 checkpointer=checkpointer,
-                interrupt_before=interrupt_before
+                interrupt_after=interrupt_after
             )
             
             self.logger.info(f"✅ Workflow {self.name} compilado con checkpointer")
-            self.logger.debug(f"📋 Interrupciones en: {interrupt_before}")
+            self.logger.debug(f"📋 Interrupciones en: {interrupt_after}")
             
             return self._graph
             
@@ -116,9 +116,9 @@ class BaseWorkflow(ABC):
                 graph = self.build_graph()
                 
                 # Configurar interrupciones si está habilitado
-                interrupt_before = self._get_interrupt_nodes()
-                if interrupt_before:
-                    self._graph = graph.compile(interrupt_before=interrupt_before)
+                interrupt_after = self._get_interrupt_nodes()
+                if interrupt_after:
+                    self._graph = graph.compile(interrupt_after=interrupt_after)
                 else:
                     self._graph = graph.compile()
                 

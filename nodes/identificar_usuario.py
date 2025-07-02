@@ -87,7 +87,7 @@ class IdentificarUsuarioNode(BaseNode):
         # ✅ DECISIÓN 1: Datos completos
         if nombre_actual and email_actual:
             
-            return self._actor_complete_with_data(new_state, state, nombre_actual, email_actual)
+            return self._actor_complete_with_data(state, nombre_actual, email_actual, new_state=new_state)
         
         # ✅ DECISIÓN 2: Escalar si muchos intentos
         if intentos > 3:
@@ -97,7 +97,7 @@ class IdentificarUsuarioNode(BaseNode):
         print('🛑'*50)
         print("Procesando input del usuario...")
         # ⚠️ PROCESAR INPUT DEL USUARIO
-        vuelta = await self._process_user_input(new_state, state)
+        vuelta = await self._process_user_input( state)
         print('🛑'*50)
         print(f"vuelta: {vuelta}")
 
@@ -157,13 +157,20 @@ class IdentificarUsuarioNode(BaseNode):
             command = self._request_both_data(state, intentos)
             return command
     
-    def _actor_complete_with_data(self, new_state, state, nombre: str, email: str, intentos: int) -> Command:
+    def _actor_complete_with_data(self,  
+                                  state, 
+                                  nombre: str, 
+                                  email: str, 
+                                  intentos: int,
+                                  new_state: Optional[Dict[str, Any]] = None) -> Command:
         """
         🎯 DECISIÓN DEL ACTOR: COMPLETAR TAREA
         
         El actor ha obtenido todos los datos necesarios y señala
         completitud al router con próximo paso específico.
         """
+        if new_state is None:
+            new_state = {}
         mensaje_confirmacion = (
             f"¡Perfecto, {nombre}! Ya tengo tus datos:\n"
             f"📧 **Email**: {email}\n"
