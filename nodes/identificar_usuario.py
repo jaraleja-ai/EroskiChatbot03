@@ -71,31 +71,33 @@ class IdentificarUsuarioNode(BaseNode):
             })
         
         # ✅ MARCAR MENSAJE COMO PROCESADO
-        state["_last_processed_message"] = current_message
-        state["waiting_for_new_input"] = False
+        new_state = dict(state)
+        new_state["_last_processed_message"] = current_message
+        new_state["waiting_for_new_input"] = False
         
         # 🔍 ANÁLISIS DEL ESTADO
         nombre_actual = state.get("nombre")
         email_actual = state.get("email")
         intentos = self.increment_attempts(state, "intentos")
-        state["intentos"] = intentos
+        new_state["intentos"] = intentos
         
         self.logger.info(f"📊 Estado: Nombre={nombre_actual}, Email={email_actual}, Intentos={intentos}")
 
 
         # ✅ DECISIÓN 1: Datos completos
         if nombre_actual and email_actual:
-            return self._actor_complete_with_data(state)
+            
+            return self._actor_complete_with_data(new_state, state, nombre_actual, email_actual)
         
         # ✅ DECISIÓN 2: Escalar si muchos intentos
         if intentos > 3:
-            return self.signal_escalation(state, "obtener datos de usuario")
+            return self.signal_escalation( state, "obtener datos de usuario", new_state=new_state)
         
         # ✅ DECISIÓN 3: Procesar input
         print('🛑'*50)
         print("Procesando input del usuario...")
         # ⚠️ PROCESAR INPUT DEL USUARIO
-        vuelta = await self._process_user_input(state)
+        vuelta = await self._process_user_input(new_state, state)
         print('🛑'*50)
         print(f"vuelta: {vuelta}")
 
@@ -155,7 +157,7 @@ class IdentificarUsuarioNode(BaseNode):
             command = self._request_both_data(state, intentos)
             return command
     
-    def _actor_complete_with_data(self, state, nombre: str, email: str, intentos: int) -> Command:
+    def _actor_complete_with_data(self, new_state, state, nombre: str, email: str, intentos: int) -> Command:
         """
         🎯 DECISIÓN DEL ACTOR: COMPLETAR TAREA
         
@@ -169,9 +171,8 @@ class IdentificarUsuarioNode(BaseNode):
             f"Ahora cuéntame, ¿cuál es el problema técnico que necesitas resolver?"
         )
         
-        # ✅ SEÑAL CLARA AL ROUTER: "Estoy completo, ir a procesar incidencia"
-        return self.signal_completion(
-            state=state,
+        new_state =  self.signal_completion(
+            new_state=new_state,
             next_actor="procesar_incidencia",  # ✅ SEÑAL EXPLÍCITA
             completion_message=mensaje_confirmacion,
             # Datos actualizados
@@ -180,6 +181,10 @@ class IdentificarUsuarioNode(BaseNode):
             datos_usuario_completos=True,  # 🔑 CLAVE: Evita bucles
             intentos=intentos  # Reset intentos para el siguiente actor
         )
+
+        update = self.get_state_diff(state, new_state)
+
+        return Command(update=update)    
     
     def _request_name_specifically(self, state, email: str, intentos: int) -> Command:
         """🎯 DECISIÓN DEL ACTOR: Solicitar nombre específicamente"""
@@ -191,13 +196,16 @@ class IdentificarUsuarioNode(BaseNode):
 
         
         # ✅ SEÑAL AL ROUTER: "Necesito input específico"
-        return self.signal_need_input(
+        new_state = self.signal_need_input(
             state={**state, "email": email, "intentos": intentos},
             request_message=mensaje,
             context={"waiting_for": "nombre", "have_email": email}
         )
+        update = self.get_state_diff(state, new_state)
+
+        return Command(update=update)       
     
-    def _request_email_specifically(self, nombre: str, intentos: int) -> Command:
+    def _request_email_specifically(self, state,nombre: str, intentos: int) -> Command:
         """🎯 DECISIÓN DEL ACTOR: Solicitar email específicamente"""
         
         mensaje = (
@@ -206,11 +214,14 @@ class IdentificarUsuarioNode(BaseNode):
         )
         
         # ✅ SEÑAL AL ROUTER: "Necesito input específico"
-        return self.signal_need_input(
-            state={"nombre": nombre, "intentos": intentos},
+        new_state = self.signal_need_input(
+            new_state={"nombre": nombre, "intentos": intentos},
             request_message=mensaje,
             context={"waiting_for": "email", "have_name": nombre}
         )
+        update = self.get_state_diff(state, new_state)
+
+        return Command(update=update)   
     
     def _request_both_data(self, state, intentos: int) -> Command:
         """🎯 DECISIÓN DEL ACTOR: Solicitar ambos datos"""
@@ -231,14 +242,15 @@ class IdentificarUsuarioNode(BaseNode):
             )
         state["intentos"]=intentos
         # ✅ SEÑAL AL ROUTER: "Necesito input de usuario"
-        command = self.signal_need_input(
-            state,
+        new_state = self.signal_need_input(
             request_message=mensaje,
             context={"waiting_for": ["nombre", "email"]})
-        return command
+        update = self.get_state_diff(state, new_state)
+
+        return Command(update=update) 
         
 
-    async def _confirm_user_data(self, state: Dict[str, Any], nombre: str, email: str) -> Command:
+    async def _confirm_user_data(self, new_state, nombre: str, email: str) -> dict:
         """✅ CONFIRMAR DATOS Y SEÑALAR COMPLETITUD AL ROUTER"""
         
         # 📝 Mensaje de confirmación para el usuario
@@ -250,8 +262,9 @@ class IdentificarUsuarioNode(BaseNode):
         )
         
         # ✅ SEÑAL CLARA AL ROUTER: "Estoy completo, ir a procesar incidencia"
-        command = self.signal_completion(
-            state=state,
+        new_state = self.signal_completion(
+            new_state=new_state,
+            # Mensaje de confirmación para el usuario
             next_actor="procesar_incidencia",
             completion_message=mensaje_confirmacion,
             # Datos actualizados
@@ -260,7 +273,7 @@ class IdentificarUsuarioNode(BaseNode):
             datos_usuario_completos=True,  # 🔑 EVITA BUCLES
             intentos=0  # Reset intentos
         )
-        return command
+        return new_state
 
     async def _handle_data_extraction_flow(self, state: Dict[str, Any], intentos: int) -> Command:
         """
@@ -288,11 +301,16 @@ class IdentificarUsuarioNode(BaseNode):
             
             # ✅ DECISIÓN AUTÓNOMA basada en datos disponibles
             if nombre_final and email_final:
+                new_state = {}
+                new_state["nombre"] = nombre_final
+                new_state["email"] = email_final
                 # TENGO TODO → Completar inmediatamente
-                return await self._confirm_user_data(state, nombre_final, email_final)
+                return await self._confirm_user_data(new_state)
             else:
+
+                new_state["intentos"] = intentos
                 # FALTAN DATOS → Solicitar específicamente lo que falta
-                return await self._handle_incomplete_data(state, nombre_final, email_final, intentos)
+                return await self._handle_incomplete_data(new_state, state)
                 
         except Exception as e:
             self.logger.error(f"❌ Error extrayendo datos: {e}")
@@ -304,9 +322,11 @@ class IdentificarUsuarioNode(BaseNode):
                 context={"error": str(e), "waiting_for": ["nombre", "email"]}
             )
 
-    async def _handle_incomplete_data(self, state: Dict[str, Any], nombre: str, email: str, intentos: int) -> Command:
+    async def _handle_incomplete_data(self, new_state, state: Dict[str, Any]) -> dict:
         """📥 MANEJAR DATOS INCOMPLETOS SIN BUCLES"""
-        
+        email = new_state["email"]
+        nombre = new_state["nombre"]
+        intentos = new_state["intentos"]
         if email and not nombre:
             mensaje = f"Tengo tu email ({email}). ¿Cuál es tu **nombre completo**?"
         elif nombre and not email:
@@ -315,11 +335,13 @@ class IdentificarUsuarioNode(BaseNode):
             mensaje = "Necesito tu **nombre completo** y **email corporativo**. ¿Puedes proporcionármelos?"
         state.update({**state, "email": email, "nombre": nombre, "intentos": intentos})
         # ✅ SEÑAL AL ROUTER: "Necesito input específico"
-        return self.signal_need_input(
-            state=state,
+        new_state = self.signal_need_input(
+            state,
             request_message=mensaje,
+            new_state = new_state,
             context={"waiting_for": "user_data", "have_email": bool(email), "have_name": bool(nombre)}
         )
+        return new_state
 
     # =====================================================
     # PREVENIR BUCLES - Agregar límite de recursión
@@ -354,6 +376,7 @@ async def identificar_usuario_node(state: Dict[str, Any]) -> Command:
     node = IdentificarUsuarioNode()
     
     print(f"🔵 ESTADO ANTES DE EXECUTE: {state.get('_actor_decision')}")
+    print(f"🔵 ESTADO ANTES DE EXECUTE: {state}")
     
     result = await node.execute_with_monitoring(state)
     

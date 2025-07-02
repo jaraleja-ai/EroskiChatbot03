@@ -1,404 +1,450 @@
 # =====================================================
-# nodes/recopilar_input_usuario.py - Nodo para recopilar input del usuario
+# nodes/recopilar_input_usuario.py - NODO DE INTERRUPCIÓN HÍBRIDO
 # =====================================================
 from typing import Dict, Any, Optional, List
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
 
-from .base_node import BaseNode
-from utils import generate_natural_message
+from .base_node import BaseNode, ActorDecision
+from utils.llm.providers import get_llm
+
 
 class RecopilarInputUsuarioNode(BaseNode):
     """
-    Nodo especializado para manejar recopilación de input del usuario.
+    🎭 ACTOR HÍBRIDO: Gestor especializado de interrupciones de usuario
     
-    Este nodo:
-    - Maneja interrupciones del flujo cuando se necesita input del usuario
-    - Establece flags correctos para el sistema de interrupciones
-    - Genera mensajes apropiados según el contexto
-    - Mantiene el contexto para continuar después de recibir el input
-    - Proporciona una transición limpia desde "__interrupt__" hacia nodos válidos
+    RESPONSABILIDADES DEL ACTOR:
+    - ✅ Detectar cuándo se necesita input del usuario
+    - ✅ Generar mensajes contextuales apropiados
+    - ✅ Establecer flags correctos para interrumpir el flujo
+    - ✅ Mantener contexto para resumir después del input
+    - ✅ Gestionar transición desde "__interrupt__" hacia nodos válidos
     
-    Funcionalidades:
-    - Detección automática del tipo de input requerido
-    - Generación de mensajes contextuales
-    - Configuración de flags de interrupción
-    - Mantenimiento del estado para continuación
+    PRINCIPIOS ACTOR:
+    - 🎯 Autonomía: Decide cómo solicitar input según contexto
+    - 🔒 Encapsulación: Maneja toda la lógica de interrupción internamente
+    - 📡 Señalización: Comunica claramente al router sus intenciones
+    - 🎪 Responsabilidad única: Solo gestiona interrupciones de usuario
+    
+    COMPATIBILIDAD LANGGRAPH:
+    - ✅ Usa Command para actualizaciones de estado
+    - ✅ Se integra con el sistema de interrupciones "__interrupt__"
+    - ✅ Compatible con el routing híbrido del workflow
     """
     
     def __init__(self):
         super().__init__("RecopilarInputUsuario", timeout_seconds=30)
+        self.llm = get_llm()
     
     def get_required_fields(self) -> List[str]:
-        """Campos requeridos en el estado"""
+        """Campos mínimos requeridos para funcionar"""
         return ["messages"]
     
-    def get_node_description(self) -> str:
-        """Descripción del nodo"""
+    def get_actor_description(self) -> str:
+        """Descripción de las responsabilidades de este actor"""
         return (
-            "Maneja la recopilación de input del usuario estableciendo flags "
-            "de interrupción y generando mensajes apropiados según el contexto"
+            "Actor especializado en gestionar interrupciones del flujo para "
+            "recopilar input del usuario de forma contextual y eficiente"
         )
     
     async def execute(self, state: Dict[str, Any]) -> Command:
         """
-        Ejecutar lógica principal de recopilación de input.
+        🎯 EJECUCIÓN PRINCIPAL: Analizar contexto y gestionar interrupción
         
-        Este nodo siempre establece flags de interrupción y genera
-        un mensaje apropiado para solicitar input del usuario.
+        Este actor siempre interrumpe el flujo y solicita input del usuario
+        de manera contextual basada en el estado actual.
         """
         
         try:
-            self.logger.info("⏸️ Iniciando recopilación de input del usuario")
+            self.logger.info("⏸️ 🎭 ACTOR iniciando gestión de interrupción")
             
-            # Obtener contexto de lo que se necesita
-            awaiting_context = self._safe_get_awaiting_context(state)
-            current_messages = state.get("messages", [])
+            # 🔍 ANÁLISIS AUTÓNOMO: ¿Qué necesitamos del usuario?
+            input_context = await self._analyze_input_needs(state)
             
-            # Generar mensaje apropiado basado en el contexto
-            user_message = await self._generate_input_request_message(awaiting_context, state)
+            # 🎨 GENERACIÓN AUTÓNOMA: Crear mensaje contextual
+            user_message = await self._generate_contextual_message(input_context, state)
             
-            # Preparar el estado para la interrupción
-            update_data = {
-                # Mantener mensajes existentes y agregar nuevo
-                "messages": [AIMessage(content=user_message)],
-                
-                # Flags CRÍTICOS para el sistema de interrupciones
-                "requires_user_input": True,
-                "workflow_state": {
-                    "waiting_for_user": True,
-                    "awaiting_context": awaiting_context,
-                    "last_node": "recopilar_input_usuario",
-                    "resume_node": awaiting_context.get("resume_node", "identificar_usuario"),
-                    "original_step": state.get("current_step", "unknown")
-                },
-                
-                # Información para debugging y continuación
-                "interruption_reason": awaiting_context.get("reason", "input_required"),
-                "pending_questions": [user_message],
-                
-                # Limpiar flag original pero mantener contexto
-                "awaiting_input": False,  # Lo manejamos con requires_user_input
-                
-                # Información de continuación del flujo
-                "next_action_after_input": awaiting_context.get("next_action", "process_input"),
-                "input_type": awaiting_context.get("type", "general"),
-                
-                # Incrementar contador de interrupciones
-                "interruption_count": state.get("interruption_count", 0) + 1
-            }
+            # 🔧 DECISIÓN AUTÓNOMA: Configurar interrupción
+            interruption_config = self._configure_interruption(input_context, state)
             
-            self.logger.info(f"⏸️ Input solicitado: {user_message[:50]}...")
-            self.logger.debug(f"🔧 Contexto de interrupción: {awaiting_context}")
+            # 📡 SEÑALIZACIÓN: Comunicar intención de interrupción al router
+            result = self.signal_need_input(
+                state=state,
+                request_message=user_message,
+                context=interruption_config
+            )
             
-            return Command(update=update_data)
+            # 🧹 ASEGURAR LIMPIEZA para evitar loops al resumir
+            # La señal "_actor_decision": "need_input" debe limpiarse después del router
+            self.logger.info("⏸️ Interrupción configurada, devolviendo control al usuario")
+            
+            return result
             
         except Exception as e:
-            self.logger.error(f"❌ Error en recopilar_input_usuario: {e}")
-            # Fallback en caso de error
-            return await self._create_fallback_response(state)
+            self.logger.error(f"❌ Error en actor de interrupción: {e}")
+            return await self._handle_interruption_error(state, e)
     
-    def _safe_get_awaiting_context(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def _analyze_input_needs(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Obtener contexto de forma segura, proporcionando defaults apropiados.
+        🧠 ANÁLISIS INTELIGENTE: Determinar qué input necesitamos
+        
+        El actor analiza el estado actual y decide autónomamente
+        qué tipo de información necesita solicitar al usuario.
         """
-        try:
-            # Intentar obtener contexto específico
-            awaiting_context = state.get("awaiting_context", {})
-            
-            if awaiting_context:
-                self.logger.debug(f"📋 Contexto específico encontrado: {awaiting_context}")
-                return awaiting_context
-            
-            # Si no hay contexto específico, inferir del estado actual
-            inferred_context = self._infer_context_from_state(state)
-            self.logger.debug(f"🔍 Contexto inferido: {inferred_context}")
-            
-            return inferred_context
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error obteniendo contexto: {e}")
-            return self._get_default_context()
+        
+        # Obtener contexto de la señal original
+        original_context = state.get("_input_context", {})
+        waiting_for = original_context.get("waiting_for", [])
+        request_type = original_context.get("type", "general")
+        
+        # Análisis del estado actual
+        datos_usuario_completos = state.get("datos_usuario_completos", False)
+        nombre = state.get("nombre", "")
+        email = state.get("email", "")
+        descripcion_problema = state.get("descripcion_problema", "")
+        
+        # 🎯 DECISIÓN AUTÓNOMA: ¿Qué falta?
+        missing_fields = []
+        input_category = "general"
+        priority_level = "normal"
+        
+        if not datos_usuario_completos:
+            if not nombre or len(nombre.strip()) < 2:
+                missing_fields.append("nombre")
+            if not email or "@" not in email:
+                missing_fields.append("email")
+            input_category = "identificacion"
+            priority_level = "high"
+        
+        elif not descripcion_problema:
+            missing_fields.append("descripcion_problema")
+            input_category = "incidencia"
+            priority_level = "high"
+        
+        elif waiting_for:
+            missing_fields = waiting_for
+            input_category = request_type
+        
+        context = {
+            "missing_fields": missing_fields,
+            "category": input_category,
+            "priority": priority_level,
+            "original_context": original_context,
+            "analysis_timestamp": self._get_timestamp(),
+            "user_completion_status": {
+                "datos_completos": datos_usuario_completos,
+                "nombre_presente": bool(nombre),
+                "email_presente": bool(email),
+                "descripcion_presente": bool(descripcion_problema)
+            }
+        }
+        
+        self.logger.info(f"🧠 Análisis completado: {missing_fields} ({input_category})")
+        return context
     
-    def _infer_context_from_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def _generate_contextual_message(
+        self, 
+        input_context: Dict[str, Any], 
+        state: Dict[str, Any]
+    ) -> str:
         """
-        Inferir contexto basado en el estado actual cuando no hay contexto explícito.
+        🎨 GENERACIÓN INTELIGENTE: Crear mensaje contextual para el usuario
+        
+        El actor genera un mensaje natural y específico basado en
+        lo que necesita y el contexto de la conversación.
         """
         
-        # Verificar qué datos faltan para inferir el tipo de input necesario
-        nombre = state.get("nombre")
-        email = state.get("email")
-        current_step = state.get("current_step", "")
+        missing_fields = input_context.get("missing_fields", [])
+        category = input_context.get("category", "general")
         
-        # Contexto para identificación de usuario
-        if not nombre and not email:
-            return {
-                "type": "user_identification",
-                "reason": "Necesito tu nombre y email para identificarte correctamente",
-                "resume_node": "identificar_usuario",
-                "fields_needed": ["nombre", "email"]
-            }
+        # Obtener contexto de la conversación
+        messages = state.get("messages", [])
+        last_user_message = ""
+        if messages:
+            for msg in reversed(messages):
+                if hasattr(msg, 'type') and msg.type == "human":
+                    last_user_message = msg.content
+                    break
         
-        elif not nombre:
-            return {
-                "type": "user_name",
-                "reason": "Necesito tu nombre completo para continuar",
-                "resume_node": "identificar_usuario",
-                "fields_needed": ["nombre"]
-            }
+        # 🎯 GENERACIÓN CONTEXTUAL BASADA EN CATEGORÍA
+        if category == "identificacion":
+            return await self._generate_identification_message(missing_fields, state)
         
-        elif not email:
-            return {
-                "type": "user_email", 
-                "reason": "Necesito tu email para verificar tu identidad",
-                "resume_node": "identificar_usuario",
-                "fields_needed": ["email"]
-            }
+        elif category == "incidencia":
+            return await self._generate_incident_message(missing_fields, state)
         
-        # Contexto para descripción de problema
-        elif "problema" in current_step.lower() or not state.get("descripcion_problema"):
-            return {
-                "type": "problem_description",
-                "reason": "Necesito que describas el problema con más detalle",
-                "resume_node": "analizar_problema",
-                "fields_needed": ["descripcion_problema"]
-            }
+        elif category == "confirmacion":
+            return await self._generate_confirmation_message(input_context, state)
         
-        # Contexto para confirmación
-        elif "confirma" in current_step.lower():
-            return {
-                "type": "confirmation",
-                "reason": "Necesito que confirmes la información proporcionada",
-                "resume_node": "procesar_confirmacion",
-                "fields_needed": ["confirmacion"]
-            }
-        
-        # Contexto general por defecto
         else:
-            return self._get_default_context()
+            # Mensaje general con IA
+            return await self._generate_ai_message(input_context, state, last_user_message)
     
-    def _get_default_context(self) -> Dict[str, Any]:
-        """Contexto por defecto cuando no se puede inferir"""
-        return {
-            "type": "general",
-            "reason": "Necesito más información para continuar ayudándote",
-            "resume_node": "identificar_usuario",
-            "fields_needed": ["informacion_adicional"]
-        }
-    
-    async def _generate_input_request_message(
+    async def _generate_identification_message(
         self, 
-        awaiting_context: Dict[str, Any], 
+        missing_fields: List[str], 
         state: Dict[str, Any]
     ) -> str:
-        """
-        Generar mensaje apropiado para solicitar input del usuario.
-        """
+        """Generar mensaje específico para identificación de usuario"""
         
-        input_type = awaiting_context.get("type", "general")
-        reason = awaiting_context.get("reason", "")
-        fields_needed = awaiting_context.get("fields_needed", [])
+        nombre = state.get("nombre", "")
+        email = state.get("email", "")
+        
+        if "nombre" in missing_fields and "email" in missing_fields:
+            return (
+                "¡Hola! Para ayudarte mejor, necesito conocerte un poco. "
+                "¿Podrías decirme tu nombre completo y tu email?"
+            )
+        
+        elif "nombre" in missing_fields:
+            return (
+                f"Perfecto, ya tengo tu email ({email}). "
+                "Ahora, ¿cuál es tu nombre completo?"
+            )
+        
+        elif "email" in missing_fields:
+            return (
+                f"Hola {nombre}! Para continuar, necesito tu dirección de email. "
+                "¿Podrías proporcionármela?"
+            )
+        
+        else:
+            return "Necesito completar tu información para continuar."
+    
+    async def _generate_incident_message(
+        self, 
+        missing_fields: List[str], 
+        state: Dict[str, Any]
+    ) -> str:
+        """Generar mensaje específico para detalles de incidencia"""
+        
+        nombre = state.get("nombre", "Usuario")
+        
+        if "descripcion_problema" in missing_fields:
+            return (
+                f"Perfecto {nombre}, ya tienes acceso al sistema. "
+                "Ahora cuéntame, ¿qué problema técnico estás experimentando? "
+                "Por favor describe los detalles para poder ayudarte mejor."
+            )
+        
+        elif "categoria" in missing_fields:
+            return (
+                "Entiendo tu problema. Para darte la mejor solución, "
+                "¿podrías decirme si se trata de un problema de red, "
+                "software, hardware o acceso?"
+            )
+        
+        else:
+            return "Necesito más detalles sobre tu incidencia para poder ayudarte."
+    
+    async def _generate_confirmation_message(
+        self, 
+        input_context: Dict[str, Any], 
+        state: Dict[str, Any]
+    ) -> str:
+        """Generar mensaje de confirmación"""
+        
+        confirmation_data = input_context.get("confirmation_data", {})
+        
+        return (
+            "Por favor confirma si la información es correcta:\n"
+            f"- Nombre: {confirmation_data.get('nombre', 'N/A')}\n"
+            f"- Email: {confirmation_data.get('email', 'N/A')}\n"
+            f"- Problema: {confirmation_data.get('descripcion', 'N/A')[:100]}...\n\n"
+            "¿Es correcto? (Sí/No)"
+        )
+    
+    async def _generate_ai_message(
+        self, 
+        input_context: Dict[str, Any], 
+        state: Dict[str, Any], 
+        last_user_message: str
+    ) -> str:
+        """Generar mensaje usando IA para casos complejos"""
         
         try:
-            # Intentar generar mensaje usando plantillas naturales
-            if hasattr(generate_natural_message, '__call__'):
-                template_data = {
-                    "reason": reason,
-                    "fields": ", ".join(fields_needed),
-                    "context": awaiting_context
-                }
-                message = await generate_natural_message(f"solicitar_{input_type}", template_data)
-                
-                if message and message.strip():
-                    return message
-                    
+            prompt = f"""
+            Contexto: Eres un asistente que necesita información adicional del usuario.
+            
+            Estado actual:
+            - Datos faltantes: {input_context.get('missing_fields', [])}
+            - Categoría: {input_context.get('category', 'general')}
+            - Último mensaje del usuario: {last_user_message[:200]}
+            
+            Genera un mensaje natural y conciso (máximo 2 frases) pidiendo
+            la información que falta. Sé amigable y específico.
+            """
+            
+            response = await self.llm.ainvoke(prompt)
+            return response.content.strip()
+            
         except Exception as e:
-            self.logger.warning(f"⚠️ Error generando mensaje natural: {e}")
-        
-        # Fallback a mensajes predefinidos
-        return self._get_predefined_message(input_type, awaiting_context, state)
+            self.logger.warning(f"⚠️ Error generando mensaje IA: {e}")
+            return (
+                "Disculpa, necesito información adicional para continuar. "
+                "¿Podrías proporcionarme los datos que faltan?"
+            )
     
-    def _get_predefined_message(
+    def _configure_interruption(
         self, 
-        input_type: str, 
-        awaiting_context: Dict[str, Any], 
+        input_context: Dict[str, Any], 
         state: Dict[str, Any]
-    ) -> str:
+    ) -> Dict[str, Any]:
         """
-        Obtener mensaje predefinido según el tipo de input.
+        🔧 CONFIGURACIÓN INTELIGENTE: Preparar configuración de interrupción
+        
+        El actor decide autónomamente cómo configurar la interrupción
+        para optimizar la experiencia del usuario y la continuación del flujo.
         """
         
-        reason = awaiting_context.get("reason", "")
+        # Determinar nodo de continuación
+        category = input_context.get("category", "general")
+        resume_node = "identificar_usuario"  # Default
         
-        # Mensajes predefinidos por tipo
-        message_templates = {
-            "user_identification": (
-                "Para ayudarte mejor, necesito que me proporciones:\n"
-                "• Tu **nombre completo**\n"
-                "• Tu **email corporativo**\n\n"
-                "Puedes escribir ambos en un solo mensaje. 😊"
-            ),
-            
-            "user_name": (
-                "¿Podrías decirme tu **nombre completo**? "
-                "Esto me ayudará a identificarte en el sistema."
-            ),
-            
-            "user_email": (
-                "Necesito tu **email corporativo** para verificar tu identidad "
-                "y asegurarme de darte la mejor ayuda posible."
-            ),
-            
-            "problem_description": (
-                "¿Podrías describir el problema con más detalle? "
-                "Cualquier información adicional me ayudará a encontrar la mejor solución:\n\n"
-                "• ¿Cuándo empezó a ocurrir?\n"
-                "• ¿Qué estabas haciendo cuando pasó?\n"
-                "• ¿Has intentado algo para solucionarlo?"
-            ),
-            
-            "hardware_info": (
-                "Para resolver tu problema de hardware, necesito conocer:\n"
-                "• **Modelo y marca** del equipo\n"
-                "• **Qué componente** está fallando\n"
-                "• **Mensajes de error** si los hay"
-            ),
-            
-            "software_info": (
-                "Para resolver el problema de software, ayúdame con:\n"
-                "• **¿Qué aplicación** está causando problemas?\n"
-                "• **¿Cuándo empezó** a ocurrir?\n"
-                "• **¿Qué mensaje de error** aparece?"
-            ),
-            
-            "network_info": (
-                "Para resolver el problema de conectividad:\n"
-                "• ¿El problema es **solo en tu equipo** o afecta otros dispositivos?\n"
-                "• ¿Puedes **acceder a internet** desde otros dispositivos?\n"
-                "• ¿Cuándo empezó el problema?"
-            ),
-            
-            "confirmation": (
-                "Por favor, confirma si la información es correcta:\n"
-                f"✅ **Sí, es correcto**\n"
-                f"❌ **No, hay errores**\n\n"
-                f"O escribe las correcciones que necesites hacer."
-            ),
-            
-            "clarification": (
-                f"Necesito aclarar algunos detalles. {reason}\n\n"
-                f"¿Puedes proporcionar más información?"
-            ),
-            
-            "general": "Necesito más información para continuar ayudándote. ¿Puedes darme más detalles?"
+        if category == "identificacion":
+            resume_node = "identificar_usuario"
+        elif category == "incidencia":
+            resume_node = "procesar_incidencia"
+        elif category == "confirmacion":
+            resume_node = "finalizar_ticket"
+        
+        # Configuración de la interrupción
+        config = {
+            "waiting_for": input_context.get("missing_fields", []),
+            "type": category,
+            "actor": self.name,
+            "resume_node": resume_node,
+            "priority": input_context.get("priority", "normal"),
+            "timeout_seconds": 300,  # 5 minutos timeout
+            "retry_attempts": 3,
+            "validation_rules": self._get_validation_rules(category),
+            "next_action": "process_input",
+            "interruption_id": f"{category}_{self._get_timestamp()}",
+            "original_state_snapshot": {
+                "nombre": state.get("nombre", ""),
+                "email": state.get("email", ""),
+                "datos_usuario_completos": state.get("datos_usuario_completos", False)
+            }
         }
         
-        # Seleccionar mensaje apropiado
-        message = message_templates.get(input_type, message_templates["general"])
-        
-        # Agregar razón específica si está disponible y no está ya incluida
-        if reason and reason not in message:
-            message = f"{reason}\n\n{message}"
-        
-        return message
+        self.logger.info(f"🔧 Configuración de interrupción: {category} → {resume_node}")
+        return config
     
-    async def _create_fallback_response(self, state: Dict[str, Any]) -> Command:
-        """
-        Crear respuesta de fallback en caso de error.
-        """
+    def _get_validation_rules(self, category: str) -> Dict[str, Any]:
+        """Obtener reglas de validación según la categoría"""
         
-        fallback_message = (
-            "Necesito más información para continuar. "
-            "¿Puedes proporcionarme los detalles que faltan?"
-        )
-        
-        return Command(update=self.create_message_update(
-            fallback_message,
-            {
-                "requires_user_input": True,
-                "workflow_state": {
-                    "waiting_for_user": True,
-                    "last_node": "recopilar_input_usuario",
-                    "resume_node": "identificar_usuario",
-                    "error_fallback": True
-                },
-                "pending_questions": [fallback_message],
-                "awaiting_input": False,
-                "interruption_reason": "fallback_error"
+        rules = {
+            "identificacion": {
+                "nombre": {"min_length": 2, "max_length": 100, "required": True},
+                "email": {"format": "email", "required": True}
+            },
+            "incidencia": {
+                "descripcion_problema": {"min_length": 10, "max_length": 1000, "required": True}
+            },
+            "confirmacion": {
+                "respuesta": {"options": ["si", "sí", "yes", "no"], "required": True}
             }
-        ))
+        }
+        
+        return rules.get(category, {})
     
-    def should_continue_after_input(self, state: Dict[str, Any]) -> bool:
+    async def _handle_interruption_error(
+        self, 
+        state: Dict[str, Any], 
+        error: Exception
+    ) -> Command:
         """
-        Determinar si el flujo debe continuar después de recibir input.
+        🚨 MANEJO DE ERRORES: Fallback cuando algo sale mal
         
-        Este método puede ser usado por otros nodos para verificar
-        si hay input pendiente de procesar.
+        El actor maneja errores de forma autónoma y proporciona
+        una experiencia de usuario degradada pero funcional.
         """
         
-        workflow_state = state.get("workflow_state", {})
-        return (
-            not workflow_state.get("waiting_for_user", False) and
-            state.get("requires_user_input", False) == False
+        self.logger.error(f"🚨 Error en gestión de interrupción: {error}")
+        
+        # Mensaje de fallback simple
+        fallback_message = (
+            "Disculpa, hay un problema técnico temporal. "
+            "¿Podrías volver a proporcionar la información que necesito?"
+        )
+        
+        # Configuración mínima de interrupción
+        fallback_config = {
+            "waiting_for": ["input_general"],
+            "type": "fallback",
+            "actor": self.name,
+            "resume_node": "identificar_usuario",
+            "priority": "high",
+            "error_recovery": True,
+            "original_error": str(error)
+        }
+        
+        return self.signal_need_input(
+            state=state,
+            request_message=fallback_message,
+            context=fallback_config
         )
     
-    def get_resume_node(self, state: Dict[str, Any]) -> str:
-        """
-        Obtener el nodo donde debe continuar el flujo después del input.
-        """
-        
-        workflow_state = state.get("workflow_state", {})
-        return workflow_state.get("resume_node", "identificar_usuario")
-    
-    def get_execution_metrics(self) -> Dict[str, Any]:
-        """
-        Obtener métricas específicas de este nodo.
-        """
-        base_metrics = super().get_execution_metrics()
-        
-        # Agregar métricas específicas de interrupciones
-        base_metrics.update({
-            "node_type": "interruption_handler",
-            "purpose": "user_input_collection",
-            "interruption_patterns": [
-                "awaiting_input",
-                "requires_user_input", 
-                "workflow_state.waiting_for_user"
-            ]
-        })
-        
-        return base_metrics
+    def _get_timestamp(self) -> str:
+        """Obtener timestamp actual"""
+        from datetime import datetime
+        return datetime.now().isoformat()
 
 
 # =====================================================
-# Función wrapper para usar con LangGraph
+# WRAPPER FUNCTION PARA LANGGRAPH
 # =====================================================
 async def recopilar_input_usuario(state: Dict[str, Any]) -> Command:
     """
-    Wrapper function para el nodo de recopilación de input del usuario.
+    🎭 Función wrapper para integración con LangGraph
+    
+    Esta función actúa como puente entre el sistema de nodos de LangGraph
+    y nuestro actor híbrido de gestión de interrupciones.
     
     Args:
-        state: Estado actual del grafo
+        state: Estado actual del grafo de LangGraph
         
     Returns:
-        Command con las actualizaciones del estado para interrumpir el flujo
+        Command con las actualizaciones necesarias para interrumpir el flujo
+        y solicitar input del usuario de forma contextual
     """
-    node = RecopilarInputUsuarioNode()
-    return await node.execute_with_monitoring(state)
+    
+    # Crear e inicializar el actor
+    actor = RecopilarInputUsuarioNode()
+    
+    # Ejecutar con monitoreo y manejo de errores
+    try:
+        return await actor.execute(state)
+    except Exception as e:
+        # Fallback de emergencia
+        actor.logger.error(f"💥 FALLO CRÍTICO en recopilar_input_usuario: {e}")
+        
+        return Command(update={
+            "messages": [AIMessage(content="Necesito más información para continuar.")],
+            "requires_user_input": True,
+            "workflow_state": {
+                "waiting_for_user": True,
+                "last_node": "recopilar_input_usuario",
+                "resume_node": "identificar_usuario",
+                "error_recovery": True
+            },
+            "pending_questions": ["Proporciona la información que falta."],
+            "interruption_reason": "critical_error"
+        })
 
 
 # =====================================================
-# Nodo de continuación (opcional)
+# ACTOR COMPLEMENTARIO: PROCESADOR DE INPUT RECIBIDO
 # =====================================================
 class ProcesarInputRecibidoNode(BaseNode):
     """
-    Nodo opcional para procesar input recibido después de una interrupción.
+    🎭 ACTOR COMPLEMENTARIO: Procesa input recibido después de interrupción
     
-    Este nodo puede ser usado para:
-    - Validar el input recibido
-    - Extraer datos específicos
-    - Determinar el próximo paso en el flujo
-    - Limpiar flags de interrupción
+    Este actor opcional se encarga de:
+    - ✅ Validar input recibido del usuario
+    - ✅ Extraer y estructurar datos
+    - ✅ Limpiar flags de interrupción
+    - ✅ Determinar próximo paso en el flujo
     """
     
     def __init__(self):
@@ -407,172 +453,178 @@ class ProcesarInputRecibidoNode(BaseNode):
     def get_required_fields(self) -> List[str]:
         return ["messages", "workflow_state"]
     
-    def get_node_description(self) -> str:
+    def get_actor_description(self) -> str:
         return (
-            "Procesa input recibido del usuario después de una interrupción "
-            "y determina cómo continuar el flujo"
+            "Actor que procesa y valida input recibido del usuario "
+            "después de una interrupción, limpiando flags y determinando continuación"
         )
     
     async def execute(self, state: Dict[str, Any]) -> Command:
         """
-        Procesar input recibido y limpiar flags de interrupción.
+        🎯 PROCESAMIENTO: Validar input y continuar flujo
         """
         
         try:
+            # Obtener contexto de la interrupción
             workflow_state = state.get("workflow_state", {})
             awaiting_context = workflow_state.get("awaiting_context", {})
             resume_node = workflow_state.get("resume_node", "identificar_usuario")
             
-            # Obtener último mensaje del usuario
-            last_user_message = self.get_last_user_message(state)
+            # Extraer último mensaje del usuario
+            last_user_message = self._get_last_user_message(state)
             
-            self.logger.info(f"🔄 Procesando input recibido: {last_user_message[:50]}...")
+            self.logger.info(f"🔄 Procesando input: {last_user_message[:50]}...")
             
-            # Procesar input según el contexto
-            processed_data = await self._process_user_input(last_user_message, awaiting_context)
+            # Procesar y validar input
+            processed_data = await self._process_and_validate_input(
+                last_user_message, 
+                awaiting_context, 
+                state
+            )
             
-            # Limpiar flags de interrupción y establecer próximo paso
+            # Preparar actualización del estado
             update_data = {
+                # Limpiar flags de interrupción
                 "requires_user_input": False,
                 "workflow_state": {
                     **workflow_state,
                     "waiting_for_user": False,
                     "awaiting_context": {},
-                    "input_processed": True
+                    "input_processed": True,
+                    "last_input_timestamp": self._get_timestamp()
                 },
-                "_next_actor": resume_node,  # Señal para el router
+                # Señalar próximo actor
+                "_next_actor": resume_node,
+                "_actor_decision": ActorDecision.COMPLETE,
+                # Datos procesados
                 **processed_data
             }
             
-            self.logger.info(f"✅ Input procesado, continuando en: {resume_node}")
-            
-            return Command(update=update_data)
+            return self.signal_completion(
+                state=update_data,
+                next_actor=resume_node,
+                completion_message=f"Input procesado, continuando en {resume_node}"
+            )
             
         except Exception as e:
             self.logger.error(f"❌ Error procesando input: {e}")
             return await self.handle_error(e, state)
     
-    async def _process_user_input(
+    def _get_last_user_message(self, state: Dict[str, Any]) -> str:
+        """Extraer último mensaje del usuario"""
+        
+        messages = state.get("messages", [])
+        for msg in reversed(messages):
+            if hasattr(msg, 'type') and msg.type == "human":
+                return msg.content
+        return ""
+    
+    async def _process_and_validate_input(
         self, 
         user_input: str, 
-        context: Dict[str, Any]
+        context: Dict[str, Any], 
+        state: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Procesar el input del usuario según el contexto.
+        Procesar y validar input del usuario según el contexto
         """
         
         input_type = context.get("type", "general")
+        validation_rules = context.get("validation_rules", {})
         
-        if input_type == "user_identification":
-            return await self._extract_user_identification(user_input)
+        # Extraer datos usando utilidades existentes
+        extracted_data = {}
         
-        elif input_type in ["user_name", "user_email"]:
-            return await self._extract_specific_user_field(user_input, input_type)
+        if input_type == "identificacion":
+            extracted_data = await self._extract_identification_data(user_input, state)
+        elif input_type == "incidencia":
+            extracted_data = await self._extract_incident_data(user_input, state)
+        elif input_type == "confirmacion":
+            extracted_data = await self._extract_confirmation_data(user_input, state)
         
-        elif input_type == "problem_description":
-            return {
-                "descripcion_problema": user_input,
-                "problema_detallado": True
-            }
+        # Validar datos extraídos
+        validation_result = self._validate_extracted_data(extracted_data, validation_rules)
         
-        elif input_type == "confirmation":
-            return await self._process_confirmation(user_input)
-        
+        if validation_result["valid"]:
+            self.logger.info("✅ Input válido y procesado")
+            return extracted_data
         else:
-            # Input general
+            self.logger.warning(f"⚠️ Input inválido: {validation_result['errors']}")
+            # Devolver datos parciales con indicador de error
             return {
-                "informacion_adicional": user_input,
-                "input_recibido": True
+                **extracted_data,
+                "validation_errors": validation_result["errors"],
+                "requires_retry": True
             }
     
-    async def _extract_user_identification(self, user_input: str) -> Dict[str, Any]:
-        """Extraer información de identificación del usuario."""
+    async def _extract_identification_data(self, user_input: str, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Extraer datos de identificación del input del usuario"""
         
-        # Aquí podrías usar la función extraer_datos_usuario de tus utils
+        # Usar extractor existente (si está disponible)
         try:
-            from utils import extraer_datos_usuario
-            datos = await extraer_datos_usuario(user_input)
-            
-            return {
-                "nombre": datos.nombre if hasattr(datos, 'nombre') else None,
-                "email": datos.email if hasattr(datos, 'email') else None,
-                "datos_extraidos": True
-            }
-            
-        except Exception as e:
-            self.logger.warning(f"⚠️ Error extrayendo datos: {e}")
-            
-            # Fallback simple con regex
-            import re
-            
-            email_match = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', user_input)
-            email = email_match.group(0) if email_match else None
-            
-            # El resto se considera nombre (simplificado)
-            name = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '', user_input).strip()
-            name = re.sub(r'\s+', ' ', name) if name else None
-            
-            return {
-                "nombre": name,
-                "email": email,
-                "datos_extraidos": True
-            }
+            from utils.extractors.user_extractor import extract_user_data
+            return await extract_user_data(user_input, state)
+        except ImportError:
+            # Fallback simple
+            return {"raw_input": user_input, "needs_processing": True}
     
-    async def _extract_specific_user_field(self, user_input: str, field_type: str) -> Dict[str, Any]:
-        """Extraer campo específico del usuario."""
+    async def _extract_incident_data(self, user_input: str, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Extraer datos de incidencia del input del usuario"""
         
-        if field_type == "user_email":
-            import re
-            email_match = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', user_input)
-            return {
-                "email": email_match.group(0) if email_match else user_input.strip(),
-                "email_actualizado": True
-            }
-        
-        elif field_type == "user_name":
-            return {
-                "nombre": user_input.strip(),
-                "nombre_actualizado": True
-            }
-        
-        return {}
+        return {
+            "descripcion_problema": user_input.strip(),
+            "timestamp": self._get_timestamp(),
+            "needs_categorization": True
+        }
     
-    async def _process_confirmation(self, user_input: str) -> Dict[str, Any]:
-        """Procesar confirmación del usuario."""
+    async def _extract_confirmation_data(self, user_input: str, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Extraer confirmación del usuario"""
         
         user_input_lower = user_input.lower().strip()
+        confirmed = any(word in user_input_lower for word in ["si", "sí", "yes", "ok", "correcto"])
         
-        # Detectar confirmación positiva
-        positive_indicators = ["si", "sí", "yes", "correcto", "ok", "vale", "confirmo", "1", "✅"]
-        negative_indicators = ["no", "incorrecto", "mal", "error", "2", "❌"]
+        return {
+            "confirmation_result": confirmed,
+            "raw_confirmation": user_input
+        }
+    
+    def _validate_extracted_data(self, data: Dict[str, Any], rules: Dict[str, Any]) -> Dict[str, Any]:
+        """Validar datos extraídos según las reglas"""
         
-        if any(indicator in user_input_lower for indicator in positive_indicators):
-            return {
-                "confirmacion": True,
-                "datos_confirmados": True
-            }
-        elif any(indicator in user_input_lower for indicator in negative_indicators):
-            return {
-                "confirmacion": False,
-                "datos_rechazados": True
-            }
-        else:
-            return {
-                "confirmacion": None,
-                "respuesta_ambigua": True,
-                "respuesta_original": user_input
-            }
+        errors = []
+        
+        for field, rule in rules.items():
+            value = data.get(field)
+            
+            if rule.get("required", False) and not value:
+                errors.append(f"Campo {field} es requerido")
+                continue
+            
+            if value and "min_length" in rule:
+                if len(str(value)) < rule["min_length"]:
+                    errors.append(f"Campo {field} debe tener al menos {rule['min_length']} caracteres")
+            
+            if value and "format" in rule and rule["format"] == "email":
+                if "@" not in str(value):
+                    errors.append(f"Campo {field} debe ser un email válido")
+        
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors
+        }
+    
+    def _get_timestamp(self) -> str:
+        """Obtener timestamp actual"""
+        from datetime import datetime
+        return datetime.now().isoformat()
 
 
+# =====================================================
+# FUNCIÓN WRAPPER PARA PROCESADOR
+# =====================================================
 async def procesar_input_recibido(state: Dict[str, Any]) -> Command:
     """
-    Wrapper function para el nodo de procesamiento de input.
-    
-    Args:
-        state: Estado actual del grafo
-        
-    Returns:
-        Command con el input procesado y flags limpiados
+    Función wrapper para el procesador de input recibido
     """
-    node = ProcesarInputRecibidoNode()
-    return await node.execute_with_monitoring(state)
+    actor = ProcesarInputRecibidoNode()
+    return await actor.execute(state)

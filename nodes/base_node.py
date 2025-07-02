@@ -84,92 +84,121 @@ class BaseNode(ABC):
     
     def signal_completion(
         self, 
-        state: Dict[str, Any],
+        new_state: Optional[Dict[str, Any]] = None,
         next_actor: str = None,
         completion_message: str = None,
         **actor_data
-    ) -> Command:
+    ) -> dict:
         """
         🎯 SEÑAL DE ACTOR: "He completado mi trabajo"
         
         El actor señala explícitamente que terminó y sugiere el próximo paso.
         """
+        if new_state is None:
+            new_state = {}
+
         self._record_decision(ActorDecision.COMPLETE, next_actor)
         
-        update_data = {
-            **state
-            **actor_data,
-            "_actor_decision": ActorDecision.COMPLETE,
-            "_next_actor": next_actor,  # Señal explícita al router
-            "_completion_message": completion_message
-        }
-        
+        new_state.update(actor_data)
+        new_state["actor_decision"] = ActorDecision.COMPLETE
+        new_state["_next_actor"] = next_actor
+        new_state["_completion_message"] = completion_message
+
         if completion_message:
-            update_data["messages"] = [AIMessage(content=completion_message)]
+            new_state["messages"] = [AIMessage(content=completion_message)]
         
         self.logger.info(f"✅ {self.name} COMPLETO → señalando a {next_actor}")
-        return Command(update=update_data)
+        return new_state
     
     def signal_need_input(
-        self, 
-        state: Dict[str, Any],
+        self,
         request_message: str,
+        new_state: Optional[Dict[str, Any]] = None,
         context: Dict[str, Any] = None
-    ) -> Command:
+    ) -> dict:
         """
         🎯 SEÑAL DE ACTOR: "Necesito información del usuario"
         
         El actor solicita específicamente datos del usuario.
         """
         self._record_decision(ActorDecision.NEED_INPUT, "user")
-        
-        update_data = {
-            **state,
+        if new_state is None:
+            new_state = {}
+        new_state.update({
             "_actor_decision": ActorDecision.NEED_INPUT,
             "_request_message": request_message,
             "_input_context": context or {},
-            "messages": [AIMessage(content=request_message)]
-        }
-        print(f'🛑🛑 signal_need_input, actor_decision: {update_data["_actor_decision"]}')
+            "messages": [AIMessage(content=request_message)],
+        })
+
+        print(f'🛑🛑 signal_need_input, actor_decision: {new_state["_actor_decision"]}')
         self.logger.info(f"📥 {self.name} SOLICITA INPUT: {request_message[:50]}...")
-        return Command(update=update_data)
+        return new_state
     
     def signal_delegation(
-        self, 
-        state: Dict[str, Any],
+        self,
         delegate_to: str,
         delegation_reason: str = None,
-        **context_data
-    ) -> Command:
+        new_state: Optional[Dict[str, Any]] = None,
+        **context_data,
+    ) -> dict:
         """
         🎯 SEÑAL DE ACTOR: "Delego esta tarea a otro actor"
         
         El actor decide que otro actor debe manejar la situación.
         """
         self._record_decision(ActorDecision.DELEGATE, delegate_to)
-        
-        update_data = {
-            **state,
+        if new_state is None:
+            new_state = {}
+        new_state.update({
             **context_data,
             "_actor_decision": ActorDecision.DELEGATE,
             "_next_actor": delegate_to,
             "_delegation_reason": delegation_reason
-        }
+        })
         
         self.logger.info(f"🔄 {self.name} DELEGA → {delegate_to}: {delegation_reason}")
-        return Command(update=update_data)
+        return new_state
     
+    def get_state_diff(old_state: dict, new_state: Optional[Dict[str, Any]] = None) -> dict:
+        """
+        Compara old_state y new_state y devuelve un dict con solo las claves
+        que son nuevas o cuyo valor cambió.
+
+                # ... lógica que produce un nuevo estado actualizado
+            new_state = dict(state)  # copia para modificar
+            new_state["intentos"] = state.get("intentos", 0) + 1
+            new_state["_actor_decision"] = "need_input"
+            new_state["_request_message"] = "Por favor, dime tu nombre y email."
+
+            # Obtener solo las diferencias para update
+            update = get_state_diff(state, new_state)
+
+            return Command(update=update)
+        """
+        if new_state is None:
+            new_state = {}
+        diff = {}
+        for key, new_value in new_state.items():
+            old_value = old_state.get(key, None)
+            if new_value != old_value:
+                diff[key] = new_value
+        return diff
+
     def signal_escalation(
-        self, 
+        self,
         state: Dict[str, Any],
         reason: str,
+        new_state: Optional[Dict[str, Any]] = None,
         **escalation_context
-    ) -> Command:
+    ) -> dict:
         """
         🎯 SEÑAL DE ACTOR: "Necesito escalación"
         
         El actor no puede completar su tarea y solicita ayuda.
         """
+        if new_state is None:
+            new_state = {}
         attempts = state["intentos"]
         self._record_decision(ActorDecision.ESCALATE, "supervisor")
         
@@ -180,7 +209,7 @@ class BaseNode(ABC):
 
         
         
-        update_data = {
+        new_state.update({
             **state,
             "intentos": attempts + 1,
             "_actor_decision": ActorDecision.ESCALATE,
@@ -189,10 +218,10 @@ class BaseNode(ABC):
             "razon_escalacion": reason,
             "messages": [AIMessage(content=escalation_message)],
             **escalation_context
-        }
+        })
         
         self.logger.warning(f"🔼 {self.name} ESCALA: {reason}")
-        return Command(update=update_data)
+        return new_state
     
     # =====================================================
     # UTILIDADES DE ACTOR (helpers)
@@ -252,10 +281,14 @@ class BaseNode(ABC):
             
             # Validar campos requeridos
             if not self._validate_required_fields(state):
-                return self.signal_escalation(
+                new_state = self.signal_escalation(
                     state, 
                     f"campos requeridos faltantes: {self.get_required_fields()}"
                 )
+                update = self.get_state_diff(state, new_state)
+
+                return Command(update=update)
+
             
             # Ejecutar lógica del actor
             result = await self.execute(state)
@@ -297,11 +330,13 @@ class BaseNode(ABC):
         
         # Si hay muchos errores, escalar
         if self._actor_state["error_count"] >= 3:
-            return self.signal_escalation(
+            new_state = self.signal_escalation(
                 state,
                 f"múltiples errores en {self.name}",
                 attempts=self._actor_state["error_count"]
             )
+            update = self.get_state_diff(state, new_state)
+            return Command(update=update)
         
         # Intentar recuperación
         return Command(update={
