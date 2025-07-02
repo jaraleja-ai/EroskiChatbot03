@@ -116,6 +116,7 @@ class IncidenciaWorkflow(BaseWorkflow):
         self.logger.info(f"🔼 escalar_a_supervisor: {state.get('escalar_a_supervisor')}")
         self.logger.info(f"🏁 flujo_completado: {state.get('flujo_completado')}")
         self.logger.info("=" * 50)
+        input("input: ")
 
     # 🔍 PRIORIDAD 1: Input del usuario necesario
         if state.get("requires_user_input", False):

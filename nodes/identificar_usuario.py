@@ -383,5 +383,5 @@ async def identificar_usuario_node(state: Dict[str, Any]) -> Command:
     print(f"🔴 COMMAND RETORNADO: {result}")
     print(f"🔴 UPDATE CONTIENE _actor_decision: {result.update.get('_actor_decision')}")
     print(f"🔴 UPDATE CONTIENE _type result: {type(result)}")
-    
+    input("input: ")
     return result
