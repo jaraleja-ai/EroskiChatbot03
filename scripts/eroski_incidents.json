@@ -28,6 +28,77 @@
       "urgency_level": 3,
       "estimated_resolution_minutes": 25,
       "requires_technical_support": true
+    },
+    "tpv_frozen": {
+      "name": "TPV Congelado",
+      "description": "Terminal de punto de venta que no responde",
+      "keywords": ["tpv", "congelado", "bloqueado", "caja", "terminal"],
+      "urgency_level": 3,
+      "category": "hardware",
+      "requires_technical_support": true,
+      "estimated_resolution_minutes": 5,
+      "common_issues": [
+          "Reiniciar el TPV manteniendo presionado el botón de encendido",
+          "Verificar conexiones de red y alimentación",
+          "Comprobar que no haya programas bloqueados"
+      ]
+    },
+    "printer_error": {
+        "name": "Error de Impresora",
+        "description": "Problemas con impresoras de tickets o etiquetas",
+        "keywords": ["impresora", "ticket", "papel", "tinta", "no imprime"],
+        "urgency_level": 2,
+        "category": "hardware",
+        "requires_technical_support": false,
+        "estimated_resolution_minutes": 3,
+        "common_issues": [
+            "Verificar que hay papel en la bandeja",
+            "Limpiar cabezales de impresión",
+            "Reiniciar la impresora"
+        ]
+    },
+    "scanner_error": {
+        "name": "Error de Scanner",
+        "description": "Problemas con lectores de códigos de barras",
+        "keywords": ["scanner", "código barras", "lector", "no lee"],
+        "urgency_level": 2,
+        "category": "hardware",
+        "requires_technical_support": false,
+        "estimated_resolution_minutes": 5,
+        "common_issues": [
+            "Limpiar el cristal del scanner",
+            "Verificar conexión USB",
+            "Reiniciar el dispositivo"
+        ]
+    },
+    "network_issue": {
+        "name": "Problema de Red",
+        "description": "Problemas de conectividad de red",
+        "keywords": ["red", "internet", "conexión", "wifi", "ethernet"],
+        "urgency_level": 3,
+        "category": "network",
+        "requires_technical_support": true,
+        "estimated_resolution_minutes": 10,
+        "common_issues": [
+            "Verificar cables de red",
+            "Reiniciar router o switch",
+            "Comprobar configuración de red"
+        ]
+    },
+    "software_error": {
+        "name": "Error de Software",
+        "description": "Problemas con aplicaciones o sistema operativo",
+        "keywords": ["software", "aplicación", "programa", "error", "pantalla"],
+        "urgency_level": 2,
+        "category": "software",
+        "requires_technical_support": true,
+        "estimated_resolution_minutes": 15,
+        "common_issues": [
+            "Reiniciar la aplicación",
+            "Actualizar software",
+            "Verificar permisos de usuario"
+        ]
     }
+    
   }
 }
