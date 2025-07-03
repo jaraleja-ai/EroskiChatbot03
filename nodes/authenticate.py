@@ -1,21 +1,20 @@
 # =====================================================
-# nodes/eroski/authenticate.py - Nodo de Autenticación de Empleados
+# nodes/authenticate.py - ACTUALIZADO: Autenticación con PostgreSQL
 # =====================================================
 """
-Nodo de autenticación optimizado para empleados de Eroski.
+Nodo de autenticación optimizado que usa la base de datos PostgreSQL real.
+
+CAMBIOS PRINCIPALES:
+- REEMPLAZA: Sistema mock de EroskiEmployeeValidator
+- USA: Base de datos PostgreSQL existente 
+- INTEGRA: UserRepository + validación real
 
 RESPONSABILIDADES:
 - Identificar empleados por email corporativo
-- Validar pertenencia a tienda específica
+- Validar contra base de datos PostgreSQL
+- Recuperar información completa del empleado
 - Manejar reintentos y escalación
-- Preparar contexto para siguientes nodos
-
-FLUJO:
-1. Primera vez: Solicitar credenciales
-2. Respuesta recibida: Validar y procesar
-3. Información válida: Continuar al siguiente nodo
-4. Información inválida: Reintentar o escalar
-5. Demasiados intentos: Escalar a supervisor
+- Actualizar último acceso en BD
 """
 
 from typing import Dict, Any, Optional, Tuple
@@ -26,27 +25,32 @@ import logging
 import re
 
 from models.eroski_state import EroskiState
-from utils.eroski_systems import EroskiEmployeeValidator  # Sistema de validación
+
+# CAMBIO: Importar validador de base de datos en lugar del mock
+from utils.eroski_database_auth import EroskiDatabaseEmployeeValidator
 
 class AuthenticateEmployeeNode:
     """
-    Nodo optimizado para autenticación de empleados de Eroski.
+    Nodo optimizado para autenticación de empleados usando PostgreSQL.
     
-    CARACTERÍSTICAS:
-    - Validación en tiempo real contra sistemas Eroski
-    - Extracción inteligente de credenciales
-    - Manejo robusto de errores
+    CARACTERÍSTICAS ACTUALIZADAS:
+    - Validación real contra base de datos PostgreSQL
+    - Recuperación completa de datos de empleado
+    - Actualización de último acceso
+    - Manejo de estados de empleado (activo/inactivo)
     - Logging detallado para auditoría
     """
     
     def __init__(self):
         self.logger = logging.getLogger("AuthenticateNode")
-        self.employee_validator = EroskiEmployeeValidator()
+        
+        # CAMBIO: Usar validador de base de datos real
+        self.employee_validator = EroskiDatabaseEmployeeValidator()
         self.max_attempts = 3
         
     async def execute(self, state: EroskiState) -> Command:
         """
-        Ejecutar lógica de autenticación con gestión de estado.
+        Ejecutar lógica de autenticación con base de datos PostgreSQL.
         
         Args:
             state: Estado actual del workflow
@@ -55,7 +59,7 @@ class AuthenticateEmployeeNode:
             Command con actualización de estado
         """
         try:
-            self.logger.info("🔐 Iniciando proceso de autenticación")
+            self.logger.info("🔐 Iniciando proceso de autenticación con BD")
             
             # Caso 1: Usuario ya autenticado - continuar
             if self._is_already_authenticated(state):
@@ -117,10 +121,10 @@ class AuthenticateEmployeeNode:
 Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona:
 
 📧 **Tu email corporativo** (ejemplo: nombre.apellido@eroski.es)
-🏪 **Tu tienda** (nombre o código de tienda)
+🏪 **Tu tienda o ubicación** (ejemplo: "Eroski Bilbao Centro")
 
 **Ejemplo:**
-"Mi email es juan.perez@eroski.es y trabajo en Eroski Bilbao Centro"
+"Mi email es juan.perez@eroski.es y trabajo en Eroski Madrid"
 
 ¿Podrías proporcionarme esta información? 😊"""
         
@@ -135,7 +139,7 @@ Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona
     
     async def _process_user_credentials(self, state: EroskiState) -> Command:
         """Procesar credenciales proporcionadas por el usuario"""
-        self.logger.info("🔍 Procesando credenciales del usuario")
+        self.logger.info("🔍 Procesando credenciales del usuario con BD")
         
         # Extraer último mensaje del usuario
         user_message = self._get_last_user_message(state)
@@ -148,8 +152,8 @@ Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona
         if not credentials["valid"]:
             return self._request_credentials_retry(state, credentials.get("error", "Credenciales no válidas"))
         
-        # Validar credenciales contra sistemas Eroski
-        validation_result = await self._validate_employee_credentials(credentials)
+        # CAMBIO: Validar credenciales contra base de datos PostgreSQL
+        validation_result = await self._validate_employee_credentials_db(credentials)
         
         if validation_result["valid"]:
             return self._handle_successful_authentication(state, validation_result)
@@ -179,8 +183,8 @@ Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona
         try:
             credentials = {"valid": False}
             
-            # Extraer email corporativo
-            email_pattern = r'\b[A-Za-z0-9._%+-]+@eroski\.es\b'
+            # Extraer email corporativo (permitir tanto @eroski.es como @empresa.com para testing)
+            email_pattern = r'\b[A-Za-z0-9._%+-]+@(eroski\.es|empresa\.com)\b'
             email_match = re.search(email_pattern, user_message, re.IGNORECASE)
             
             if not email_match:
@@ -199,12 +203,8 @@ Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona
             
             # Extraer información de tienda
             store_info = self._extract_store_info(user_message)
-            if store_info:
-                credentials["store_info"] = store_info
-                credentials["valid"] = True
-            else:
-                credentials["store_info"] = "No especificada"
-                credentials["valid"] = True  # Email válido es suficiente inicialmente
+            credentials["store_info"] = store_info if store_info else "No especificada"
+            credentials["valid"] = True
             
             self.logger.info(f"📧 Credenciales extraídas para: {name}")
             
@@ -225,8 +225,8 @@ Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona
             r'centro\s+([a-záéíóúñ\s]+)',
             r'hipermercado\s+([a-záéíóúñ\s]+)',
             r'supermercado\s+([a-záéíóúñ\s]+)',
-            r'código\s+(\d+)',
-            r'tienda\s+(\d+)'
+            r'oficina\s+([a-záéíóúñ\s]+)',
+            r'sede\s+([a-záéíóúñ\s]+)'
         ]
         
         message_lower = message.lower()
@@ -241,9 +241,9 @@ Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona
         
         return None
     
-    async def _validate_employee_credentials(self, credentials: Dict[str, Any]) -> Dict[str, Any]:
+    async def _validate_employee_credentials_db(self, credentials: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Validar credenciales contra sistemas de Eroski.
+        Validar credenciales contra base de datos PostgreSQL.
         
         Args:
             credentials: Credenciales extraídas
@@ -252,43 +252,47 @@ Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona
             Resultado de validación
         """
         try:
-            # Validar empleado en sistemas Eroski
+            self.logger.info(f"🔍 Validando empleado en BD: {credentials['email']}")
+            
+            # CAMBIO: Usar validador de base de datos real
             employee_data = await self.employee_validator.validate_employee(
                 email=credentials["email"],
                 store_hint=credentials.get("store_info")
             )
             
             if employee_data:
-                self.logger.info(f"✅ Empleado validado: {employee_data['name']}")
+                self.logger.info(f"✅ Empleado validado desde BD: {employee_data['name']}")
                 return {
                     "valid": True,
                     "employee": employee_data
                 }
             else:
-                self.logger.warning(f"❌ Empleado no encontrado: {credentials['email']}")
+                self.logger.warning(f"❌ Empleado no encontrado en BD: {credentials['email']}")
                 return {
                     "valid": False,
-                    "error": "No se encontró el empleado en los sistemas de Eroski"
+                    "error": "No se encontró el empleado en la base de datos de Eroski"
                 }
                 
         except Exception as e:
-            self.logger.error(f"❌ Error validando empleado: {e}")
+            self.logger.error(f"❌ Error validando empleado en BD: {e}")
             return {
                 "valid": False,
-                "error": f"Error de conexión con sistemas Eroski: {str(e)}"
+                "error": f"Error de conexión con la base de datos: {str(e)}"
             }
     
     def _handle_successful_authentication(self, state: EroskiState, validation_result: Dict[str, Any]) -> Command:
         """Manejar autenticación exitosa"""
         employee = validation_result["employee"]
         
-        self.logger.info(f"🎉 Autenticación exitosa: {employee['name']}")
+        self.logger.info(f"🎉 Autenticación exitosa desde BD: {employee['name']}")
         
+        # Crear mensaje personalizado con información de BD
         success_message = f"""¡Perfecto, {employee['name']}! 👋
 
-Ya te tengo identificado:
+Ya te tengo identificado desde la base de datos:
 🏪 **Tienda:** {employee['store_name']}
 📍 **Departamento:** {employee.get('department', 'No especificado')}
+🆔 **Empleado:** {employee.get('id', 'N/A')}
 
 ¿En qué puedo ayudarte hoy? Puedes contarme sobre:
 • 🔧 **Problemas técnicos** (TPV, impresoras, red, etc.)
@@ -312,7 +316,14 @@ Ya te tengo identificado:
             "messages": state.get("messages", []) + [AIMessage(content=success_message)],
             "current_node": "authenticate",
             "last_activity": datetime.now(),
-            "authentication_stage": "completed"
+            "authentication_stage": "completed",
+            
+            # NUEVO: Información adicional de BD
+            "employee_since": employee.get("employee_since"),
+            "last_updated": employee.get("last_updated"),
+            "store_address": employee.get("store_address"),
+            "store_phone": employee.get("store_phone"),
+            "store_region": employee.get("store_region")
         })
     
     def _request_credentials_retry(self, state: EroskiState, error_reason: str) -> Command:
@@ -326,16 +337,16 @@ Ya te tengo identificado:
         
         self.logger.info(f"🔄 Solicitando credenciales nuevamente (intento {attempts + 1}/{self.max_attempts})")
         
-        retry_message = f"""No he podido verificar tu identidad (intento {attempts + 1}/{self.max_attempts}).
+        retry_message = f"""No he podido verificar tu identidad en la base de datos (intento {attempts + 1}/{self.max_attempts}).
 
 **Problema detectado:** {error_reason}
 
 Por favor, asegúrate de incluir:
 📧 **Email corporativo completo** (debe terminar en @eroski.es)
-🏪 **Nombre de tu tienda** (ej: "Eroski Bilbao Centro")
+🏪 **Nombre de tu tienda o ubicación** (ej: "Eroski Bilbao Centro")
 
 **Ejemplo correcto:**
-"Mi email es maria.garcia@eroski.es y trabajo en Eroski Madrid Salamanca"
+"Mi email es maria.garcia@eroski.es y trabajo en las oficinas centrales de Elorrio"
 
 ¿Puedes intentar de nuevo? 🙏"""
         
@@ -353,20 +364,24 @@ Por favor, asegúrate de incluir:
         """Escalar por fallo en autenticación"""
         self.logger.error(f"🚨 Escalando por fallo de autenticación: {final_error}")
         
-        escalation_message = """Lo siento, no he podido verificar tu identidad después de varios intentos. 😔
+        escalation_message = """Lo siento, no he podido verificar tu identidad en la base de datos después de varios intentos. 😔
 
-He derivado tu consulta a un supervisor que te ayudará a identificarte correctamente.
+**Posibles causas:**
+• Tu email podría no estar registrado en el sistema
+• Podrías estar usando un email incorrecto
+• Podría haber un problema temporal con la base de datos
 
-📧 **Recibirás una respuesta por email** en las próximas 2 horas
-📞 **Para urgencias, contacta directamente:**
-   • Soporte técnico: +34 900 123 456
+**Qué hacer ahora:**
+📧 **Te he derivado a un supervisor** que te ayudará a identificarte correctamente
+📞 **Para urgencias inmediatas, contacta:**
+   • Soporte técnico: +34 946 211 000
    • Email directo: soporte.urgente@eroski.es
 
 ¡Gracias por tu paciencia! 🙏"""
         
         return Command(update={
             "escalation_needed": True,
-            "escalation_reason": f"Fallo de autenticación después de {self.max_attempts} intentos: {final_error}",
+            "escalation_reason": f"Fallo de autenticación en BD después de {self.max_attempts} intentos: {final_error}",
             "escalation_level": "supervisor",
             "awaiting_user_input": False,
             "messages": state.get("messages", []) + [AIMessage(content=escalation_message)],
@@ -393,18 +408,23 @@ He derivado tu consulta a un supervisor que te ayudará a identificarte correcta
         
         error_response = """Ha ocurrido un error técnico durante la autenticación. 🔧
 
-Por favor:
+**Posibles causas:**
+• Problema temporal con la base de datos
+• Error de conectividad
+• Sobrecarga del sistema
+
+**Qué hacer:**
 1. **Intenta nuevamente** en unos minutos
 2. **Si persiste el problema**, contacta con soporte técnico
 
-📞 **Soporte técnico:** +34 900 123 456
+📞 **Soporte técnico:** +34 946 211 000
 📧 **Email:** soporte.tecnico@eroski.es
 
 ¡Disculpa las molestias! 😊"""
         
         return Command(update={
             "escalation_needed": True,
-            "escalation_reason": f"Error técnico en autenticación: {error_message}",
+            "escalation_reason": f"Error técnico en autenticación con BD: {error_message}",
             "messages": state.get("messages", []) + [AIMessage(content=error_response)],
             "awaiting_user_input": False,
             "current_node": "authenticate",
@@ -412,90 +432,11 @@ Por favor:
             "error_count": state.get("error_count", 0) + 1
         })
 
-# ========== SISTEMA DE VALIDACIÓN DE EMPLEADOS ==========
-
-class EroskiEmployeeValidator:
-    """
-    Sistema de validación de empleados de Eroski.
-    
-    NOTA: Esta es una implementación mock para desarrollo.
-    En producción debe conectar con Active Directory y sistemas HR reales.
-    """
-    
-    def __init__(self):
-        self.logger = logging.getLogger("EmployeeValidator")
-        
-        # Mock database de empleados para desarrollo
-        self.mock_employees = {
-            "juan.perez@eroski.es": {
-                "id": "E001",
-                "name": "Juan Pérez",
-                "email": "juan.perez@eroski.es",
-                "store_id": "ERO001",
-                "store_name": "Eroski Bilbao Centro",
-                "store_type": "hipermercado",
-                "department": "Tecnología",
-                "level": 2
-            },
-            "maria.garcia@eroski.es": {
-                "id": "E002", 
-                "name": "María García",
-                "email": "maria.garcia@eroski.es",
-                "store_id": "ERO002",
-                "store_name": "Eroski Madrid Salamanca",
-                "store_type": "supermercado",
-                "department": "Caja",
-                "level": 1
-            },
-            "admin.test@eroski.es": {
-                "id": "E999",
-                "name": "Admin Test",
-                "email": "admin.test@eroski.es", 
-                "store_id": "ERO999",
-                "store_name": "Eroski Test Store",
-                "store_type": "test",
-                "department": "IT",
-                "level": 3
-            }
-        }
-    
-    async def validate_employee(self, email: str, store_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """
-        Validar empleado contra sistemas Eroski.
-        
-        Args:
-            email: Email del empleado
-            store_hint: Pista sobre la tienda
-            
-        Returns:
-            Datos del empleado si es válido, None en caso contrario
-        """
-        try:
-            self.logger.info(f"🔍 Validando empleado: {email}")
-            
-            # Simular latencia de red
-            import asyncio
-            await asyncio.sleep(0.5)
-            
-            # Buscar en mock database
-            employee = self.mock_employees.get(email.lower())
-            
-            if employee:
-                self.logger.info(f"✅ Empleado encontrado: {employee['name']}")
-                return employee.copy()
-            else:
-                self.logger.warning(f"❌ Empleado no encontrado: {email}")
-                return None
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error validando empleado: {e}")
-            return None
-
 # ========== WRAPPER PARA LANGGRAPH ==========
 
 async def authenticate_employee_node(state: EroskiState) -> Command:
     """
-    Wrapper function para el nodo de autenticación.
+    Wrapper function para el nodo de autenticación con BD.
     
     Args:
         state: Estado actual del workflow

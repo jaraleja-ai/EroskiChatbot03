@@ -83,7 +83,7 @@ class EroskiFinalWorkflow(BaseWorkflow):
         
         # ========== IMPORTAR Y AGREGAR NODOS ==========
         try:
-            from nodes.eroski.authenticate import authenticate_employee_node
+            from nodes.authenticate import authenticate_employee_node
             from nodes.eroski.classify import classify_query_node
             from nodes.eroski.collect_incident import collect_incident_details_node
             from nodes.eroski.search_solution import search_solution_node
