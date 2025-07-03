@@ -137,7 +137,7 @@ Por favor, responde con una de estas opciones:
 **¿Cómo está funcionando ahora?** 🤔"""
         
         return Command(update={
-            "messages": state.get("messages", []) + [AIMessage(content=confirmation_message)],
+            "messages": [AIMessage(content=confirmation_message)],
             "awaiting_user_input": True,
             "current_node": "verify",
             "last_activity": datetime.now(),
@@ -179,7 +179,7 @@ Si tienes otros problemas o consultas, no dudes en contactarme de nuevo.
             "user_feedback": feedback,
             "solution_effective": True,
             "ticket_status": "Cerrada",
-            "messages": state.get("messages", []) + [AIMessage(content=success_message)],
+            "messages": [AIMessage(content=success_message)],
             "current_node": "verify",
             "last_activity": datetime.now(),
             "awaiting_user_input": False,
@@ -214,7 +214,7 @@ Entiendo que la solución no ha funcionado completamente.
             "resolved": False,
             "solution_effective": False,
             "verification_attempts": attempts + 1,
-            "messages": state.get("messages", []) + [AIMessage(content=failure_message)],
+            "messages": [AIMessage(content=failure_message)],
             "awaiting_user_input": True,
             "current_node": "verify",
             "last_activity": datetime.now(),
@@ -246,7 +246,7 @@ Entiendo que la solución ha mejorado el problema pero no lo ha resuelto complet
             "resolved": False,
             "solution_effective": "partial",
             "partial_resolution": True,
-            "messages": state.get("messages", []) + [AIMessage(content=partial_message)],
+            "messages": [AIMessage(content=partial_message)],
             "awaiting_user_input": True,
             "current_node": "verify",
             "last_activity": datetime.now(),
@@ -273,7 +273,7 @@ No he podido entender claramente si el problema se ha resuelto.
             return self._escalate_unclear_status(state)
         
         return Command(update={
-            "messages": state.get("messages", []) + [AIMessage(content=clarification_message)],
+            "messages": [AIMessage(content=clarification_message)],
             "verification_attempts": attempts + 1,
             "awaiting_user_input": True,
             "current_node": "verify",
@@ -317,7 +317,7 @@ El problema no se ha resuelto con las soluciones automáticas disponibles.
             "escalation_level": "technical",
             "resolved": False,
             "solution_effective": False,
-            "messages": state.get("messages", []) + [AIMessage(content=escalation_message)],
+            "messages": [AIMessage(content=escalation_message)],
             "current_node": "verify",
             "last_activity": datetime.now(),
             "awaiting_user_input": False,
@@ -331,7 +331,7 @@ El problema no se ha resuelto con las soluciones automáticas disponibles.
             "escalation_needed": True,
             "escalation_reason": "No se pudo verificar el estado de resolución",
             "escalation_level": "supervisor",
-            "messages": state.get("messages", []) + [
+            "messages": [
                 AIMessage(content="No he podido verificar el estado de resolución. Te derivo a un supervisor para asistencia personalizada.")
             ],
             "current_node": "verify",
@@ -392,7 +392,7 @@ El problema no se ha resuelto con las soluciones automáticas disponibles.
             "escalation_needed": True,
             "escalation_reason": f"Error técnico en verificación: {error_message}",
             "escalation_level": "technical",
-            "messages": state.get("messages", []) + [
+            "messages": [
                 AIMessage(content="Ha ocurrido un error técnico. Te derivo a soporte técnico.")
             ],
             "current_node": "verify",

@@ -97,7 +97,7 @@ class ExampleNode:
         update_data = NodeVisitManager.update_execution_path(state, self.name)
         update_data.update({
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "attempts": 0  # Reset intentos en primera visita
         })
@@ -120,7 +120,7 @@ class ExampleNode:
         update_data = NodeVisitManager.update_execution_path(state, self.name)
         update_data.update({
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "attempts": state.get("attempts", 0) + 1  # Incrementar intentos en revisita
         })
@@ -171,7 +171,7 @@ Por favor, proporciona:
         update_data = NodeVisitManager.update_execution_path(state, self.name)
         update_data.update({
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=welcome_message)],
+            "messages": [AIMessage(content=welcome_message)],
             "awaiting_user_input": True,
             "attempts": 1,
             "authentication_stage": "initial_request"
@@ -201,7 +201,7 @@ Por favor, verifica que incluyes:
         update_data = NodeVisitManager.update_execution_path(state, self.name)
         update_data.update({
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=retry_message)],
+            "messages": [AIMessage(content=retry_message)],
             "awaiting_user_input": True,
             "attempts": attempts + 1,
             "authentication_stage": "retry"
@@ -245,7 +245,7 @@ No he podido verificar tu identidad después de varios intentos.
             "escalation_needed": True,
             "escalation_reason": "Fallos repetidos de autenticación",
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=escalation_message)],
+            "messages": [AIMessage(content=escalation_message)],
             "awaiting_user_input": False,
             "authentication_stage": "escalated"
         })

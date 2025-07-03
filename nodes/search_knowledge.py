@@ -299,7 +299,7 @@ class search_knowledge_node(BaseNode):
             "information_provided": [result["title"] for result in results],
             "search_results": results,
             "needs_followup": needs_followup,
-            "messages": state.get("messages", []) + [AIMessage(content=info_message)],
+            "messages": [AIMessage(content=info_message)],
             "current_node": "search_knowledge",
             "last_activity": datetime.now(),
             "awaiting_user_input": False

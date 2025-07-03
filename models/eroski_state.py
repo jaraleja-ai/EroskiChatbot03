@@ -18,10 +18,12 @@ PRINCIPIOS DE DISEÑO:
 - Fácil serialización y persistencia
 """
 
-from typing import TypedDict, List, Optional, Any, Dict
+from typing import TypedDict, Optional, Any, Dict
+from typing import Annotated, List
 from langchain_core.messages import BaseMessage
 from datetime import datetime
 from enum import Enum
+from langgraph.graph.message import add_messages
 
 # ========== ENUMS PARA TIPOS ESPECÍFICOS ==========
 
@@ -89,7 +91,7 @@ class EroskiState(TypedDict, total=False):
     authenticated: bool                     # Si el empleado está autenticado
     
     # ========== CONVERSACIÓN ==========
-    messages: List[BaseMessage]             # Historia de mensajes
+    messages: Annotated[List[BaseMessage], add_messages]             # Historia de mensajes
     
     # ========== CLASIFICACIÓN DE LA CONSULTA ==========
     query_type: Optional[ConsultaType]      # Tipo de consulta identificado

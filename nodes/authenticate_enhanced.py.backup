@@ -18,6 +18,7 @@ from langgraph.types import Command
 from datetime import datetime
 import logging
 import re
+import json
 
 from models.eroski_state import EroskiState
 from nodes.base_node import BaseNode
@@ -26,6 +27,100 @@ from utils.llm.providers import get_llm
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
+
+logging.basicConfig(
+    level=logging.info,
+    format='[%(filename)s:%(lineno)d] %(levelname)s - %(message)s'
+)
+
+
+class RobustJsonOutputParser(JsonOutputParser):
+    """
+    Parser JSON robusto que maneja respuestas LLM con markdown y otros formatos.
+    """
+    
+    def parse(self, text: str):
+        """
+        Parsear respuesta LLM con múltiples estrategias de fallback.
+        """
+        try:
+            # Estrategia 1: Parser original (JSON directo)
+            return super().parse(text)
+            
+        except Exception as e:
+            # Si falla, usar estrategias de fallback
+            return self._robust_parse(text)
+    
+    def _robust_parse(self, text: str):
+        """
+        Parser robusto con múltiples estrategias de extracción.
+        """
+        # Estrategia 2: Extraer JSON de bloques markdown
+        json_patterns = [
+            r'```json\s*\n(.*?)\n```',  # ```json ... ```
+            r'```\s*\n(.*?)\n```',     # ``` ... ```
+            r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # JSON más complejo
+        ]
+        
+        for pattern in json_patterns:
+            match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+            if match:
+                json_str = match.group(1) if '```' in pattern else match.group(0)
+                try:
+                    return json.loads(json_str.strip())
+                except json.JSONDecodeError:
+                    continue
+        
+        # Estrategia 3: Buscar JSON en cualquier parte del texto
+        try:
+            # Encontrar primer { y último }
+            start = text.find('{')
+            end = text.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                json_str = text[start:end+1]
+                return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+        
+        # Estrategia 4: Parser manual por líneas
+        return self._manual_parse(text)
+    
+    def _manual_parse(self, text: str):
+        """
+        Parser manual cuando todo lo demás falla.
+        Extrae información línea por línea.
+        """
+        result = {
+            "wants_to_cancel": False,
+            "has_email": False,
+            "has_name": False,
+            "has_store_code": False,
+            "has_store_name": False,
+            "has_section": False,
+            "missing_fields": [],
+            "next_message": "¿Podrías repetir la información, por favor?"
+        }
+        
+        text_lower = text.lower()
+        
+        # Detectar cancelación
+        cancel_keywords = ["cancel", "salir", "no quiero", "olvídalo", "adiós"]
+        result["wants_to_cancel"] = any(keyword in text_lower for keyword in cancel_keywords)
+        
+        # Detectar email
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        result["has_email"] = bool(re.search(email_pattern, text))
+        
+        # Detectar nombre (patrón simple)
+        name_patterns = [
+            r'"name":\s*"([^"]+)"',
+            r'"nombre":\s*"([^"]+)"',
+            r'name.*?true',
+            r'nombre.*?true'
+        ]
+        result["has_name"] = any(re.search(pattern, text_lower) for pattern in name_patterns)
+        
+        return result
 
 class UserResponseAnalysis(BaseModel):
     """Análisis de la respuesta del usuario por LLM"""
@@ -48,57 +143,95 @@ class AuthenticateEmployeeNodeComplete(BaseNode):
     """
     Nodo de autenticación completo que recopila toda la información necesaria.
     """
-    
+
     def __init__(self):
         super().__init__("authenticate")
-        self.max_attempts = 7  # Más intentos para recopilar toda la información
+        self.max_attempts = 7
         self.db_auth = EroskiEmployeeDatabaseAuth()
         self.llm = get_llm()
         
-        # Parser para análisis LLM
-        self.parser = JsonOutputParser(pydantic_object=UserResponseAnalysis)
+        # CAMBIO: Usar parser robusto en lugar del básico
+        self.robust_parser = RobustJsonOutputParser(pydantic_object=UserResponseAnalysis)
+        self.parser = self.robust_parser  # Mantener compatibilidad
         
-        # Prompt para analizar respuesta del usuario
+        # Prompt mejorado con mejor formato
         self.analysis_prompt = PromptTemplate(
-            template="""Eres un asistente experto en procesar respuestas de empleados de Eroski.
+        template="""Eres un asistente experto en procesar respuestas de empleados de Eroski para el sistema de incidencias.
 
-Tu tarea es analizar la respuesta del usuario y extraer información para el proceso de autenticación e incidencias.
+    DATOS ACTUALES RECOPILADOS:
+    {current_data}
 
-DATOS QUE NECESITAMOS RECOPILAR:
-- Email corporativo (@eroski.es)
-- Nombre completo
-- Código de tienda (ej: "T001", "ERO_BCN", etc.)
-- Nombre de tienda (ej: "Eroski Bilbao Centro")
-- Sección donde ocurrió la incidencia (ej: "Carnicería", "Caja", "Almacén")
+    ETAPA ACTUAL: {current_stage}
 
-INFORMACIÓN ACTUAL YA RECOPILADA:
-{current_data}
+    MENSAJE DEL USUARIO: "{user_message}"
 
-ETAPA ACTUAL: {current_stage}
+    Analiza este mensaje y devuelve un JSON con esta estructura EXACTA:
 
-MENSAJE DEL USUARIO:
-"{user_message}"
+    {{
+        "wants_to_cancel": false,
+        "has_email": false,
+        "has_name": false,
+        "has_store_code": false,
+        "has_store_name": false,
+        "has_section": false,
+        "confirmed_same_store": null,
+        "email": null,
+        "name": null,
+        "store_code": null,
+        "store_name": null,
+        "section": null,
+        "missing_fields": ["campo1", "campo2"],
+        "mensaje_usuario": "Mensaje natural para el usuario"
+    }}
 
-INSTRUCCIONES:
-1. PRIMERO: Detecta si el usuario quiere CANCELAR (palabras como: "cancelar", "salir", "no quiero", "déjalo", "olvídalo", "hasta luego", "adiós")
-2. Extrae TODA la información nueva del mensaje
-3. Si estamos preguntando sobre la tienda registrada, detecta confirmación (sí/no)
-4. Identifica qué información aún falta
-5. Genera un mensaje natural, breve y amable para continuar
+    REGLAS DE ANÁLISIS:
+    1. 🚨 CANCELACIÓN: Detecta palabras como "cancelar", "salir", "no quiero", "adiós", "olvídalo"
+    2. 📧 EMAIL: Detecta emails - extrae el email completo
+    3. 👤 NOMBRE: Detecta nombres completos (Nombre Apellido) - extrae el nombre completo
+    4. 🏪 CÓDIGO TIENDA: Detecta códigos como "T001", "ERO_BCN", "TIENDA_001" - extrae el código
+    5. 🏬 NOMBRE TIENDA: Detecta "Eroski + ubicación" como "Eroski Bilbao Centro" - extrae el nombre
+    6. 🔧 SECCIÓN: Detecta departamentos como "carnicería", "caja", "almacén", "panadería" - extrae la sección
+    7. ✅ CONFIRMACIÓN: Si preguntamos sobre tienda registrada, detecta "sí/no", "correcto/incorrecto"
 
-EJEMPLOS DE MENSAJES NATURALES POR SITUACIÓN:
-- Pidiendo email: "¿Podrías decirme tu email corporativo de Eroski?"
-- Pidiendo nombre: "Perfecto, ¿y tu nombre completo?"
-- Confirmando tienda: "Veo que trabajas en Eroski Madrid Sur. ¿La incidencia ha ocurrido en esa misma tienda?"
-- Pidiendo nueva tienda: "Entiendo, ¿podrías decirme el código y nombre de la tienda donde ocurrió?"
-- Pidiendo sección: "¿En qué sección específica ha tenido lugar la incidencia?"
+    GENERACIÓN DE MENSAJES CONTEXTUALES:
+    Basándote en la ETAPA ACTUAL y lo que FALTA, genera un mensaje natural:
 
-{format_instructions}
-""",
-            input_variables=["current_data", "current_stage", "user_message"],
-            partial_variables={"format_instructions": self.parser.get_format_instructions()}
-        )
-    
+    📧 PIDIENDO EMAIL:
+    - "¿Podrías decirme tu email corporativo de Eroski?"
+    - "Necesito tu email de Eroski para identificarte"
+
+    👤 PIDIENDO NOMBRE:
+    - "Perfecto, ¿y tu nombre completo?"
+    - "¿Cómo te llamas?"
+
+    🏪 CONFIRMANDO TIENDA REGISTRADA:
+    - "Veo que trabajas en [TIENDA]. ¿La incidencia ha ocurrido en esa misma tienda?"
+    - "Según nuestros registros trabajas en [TIENDA]. ¿Es ahí donde ocurrió el problema?"
+
+    🏬 PIDIENDO TIENDA DIFERENTE:
+    - "Entiendo, ¿podrías decirme el código y nombre de la tienda donde ocurrió?"
+    - "¿En qué tienda específica ha tenido lugar la incidencia?"
+
+    🔧 PIDIENDO SECCIÓN:
+    - "¿En qué sección específica ha tenido lugar la incidencia?"
+    - "¿Podrías decirme en qué departamento ocurrió el problema?"
+
+    ✅ DATOS COMPLETOS:
+    - "Perfecto, ya tengo todos tus datos. Ahora cuéntame qué problema técnico estás experimentando."
+    - "Excelente, continuemos con los detalles de la incidencia."
+
+    ⚠️ ERROR/REPETIR:
+    - "No he entendido bien tu respuesta. ¿Podrías repetir [CAMPO ESPECÍFICO]?"
+    - "Parece que falta información. ¿Podrías decirme [CAMPO ESPECÍFICO]?"
+
+    IMPORTANTE: 
+    - Responde SOLO con JSON válido, sin markdown ni explicaciones adicionales
+    - Si extraes información, inclúyela en los campos correspondientes
+    - Genera mensajes naturales, amables y específicos para cada situación
+    - Considera el contexto y la etapa actual para personalizar el mensaje""",
+        input_variables=["current_data", "current_stage", "user_message"]
+    )
+
     def get_required_fields(self) -> List[str]:
         return ["messages"]
     
@@ -113,17 +246,21 @@ EJEMPLOS DE MENSAJES NATURALES POR SITUACIÓN:
         try:
             # Caso 1: Proceso completado - pasar al siguiente nodo
             if self._is_authentication_complete(state):
+                self.logger.info("🌄JGL - Caso 1: Autenticación completa")
                 return self._complete_authentication(state)
             
             # Caso 2: Primera ejecución
             if self._is_first_execution(state):
+                self.logger.info("🌄JGL - Caso 2: Primera ejecución")
                 return self._request_initial_credentials(state)
             
             # Caso 3: Procesar respuesta del usuario
             if self._has_user_response(state):
+                self.logger.info("🌄JGL - Caso 3: has user response")
                 return await self._process_user_response(state)
             
             # Caso 4: Estado inconsistente
+            self.logger.info("🌄JGL - Caso 4: estado inconsistente")
             return self._handle_inconsistent_state(state)
             
         except Exception as e:
@@ -144,11 +281,19 @@ EJEMPLOS DE MENSAJES NATURALES POR SITUACIÓN:
     def _is_first_execution(self, state: EroskiState) -> bool:
         """Verificar si es la primera ejecución"""
         messages = state.get("messages", [])
-        return len(messages) == 0 or not any(isinstance(msg, HumanMessage) for msg in messages)
+        self.logger.info(f"🌄JGL - _is_first_execution: \
+                         \nlen(messages): {len(messages)} \
+                         \nmessages: {messages}"\
+                         )
+        return len(messages) == 1 or not any(isinstance(msg, HumanMessage) for msg in messages)
     
     def _has_user_response(self, state: EroskiState) -> bool:
         """Verificar si hay respuesta del usuario"""
         messages = state.get("messages", [])
+        self.logger.info(f"🌄JGL - _has_user_response: \
+                         \nlen(messages): {len(messages)} \
+                         \nmessages: {messages}"\
+                         )
         return any(isinstance(msg, HumanMessage) for msg in messages)
     
     def _request_initial_credentials(self, state: EroskiState) -> Command:
@@ -165,7 +310,7 @@ Para ayudarte, necesito identificarte. ¿Podrías decirme tu **email corporativo
         
         return Command(update={
             "current_node": "authenticate",
-            "messages": state.get("messages", []) + [AIMessage(content=welcome_message)],
+            "messages": [AIMessage(content=welcome_message)],
             "awaiting_user_input": True,
             "attempts": 1,
             "authentication_stage": "requesting_email",
@@ -183,6 +328,8 @@ Para ayudarte, necesito identificarte. ¿Podrías decirme tu **email corporativo
         # Analizar respuesta del usuario con LLM
         analysis = await self._analyze_user_response(state)
         
+        self.logger.info(f"🌄JGL - _process_user_response: nanalysis: {analysis}" )
+
         # Verificar si quiere cancelar
         if analysis.wants_to_cancel:
             return self._handle_cancellation_request(state)
@@ -205,8 +352,12 @@ Para ayudarte, necesito identificarte. ¿Podrías decirme tu **email corporativo
         else:
             return self._continue_data_collection(state, analysis)
     
+    
+
     async def _analyze_user_response(self, state: EroskiState) -> UserResponseAnalysis:
-        """Analizar respuesta del usuario con LLM"""
+        """
+        Analizar respuesta del usuario con LLM - VERSIÓN MEJORADA
+        """
         try:
             # Obtener último mensaje del usuario
             user_message = self._get_last_user_message(state)
@@ -215,7 +366,7 @@ Para ayudarte, necesito identificarte. ¿Podrías decirme tu **email corporativo
             current_data = self._format_current_data(state)
             current_stage = state.get("authentication_stage", "requesting_email")
             
-            # Crear prompt
+            # Crear prompt mejorado
             formatted_prompt = self.analysis_prompt.format(
                 current_data=current_data,
                 current_stage=current_stage,
@@ -226,8 +377,19 @@ Para ayudarte, necesito identificarte. ¿Podrías decirme tu **email corporativo
             self.logger.debug("🤖 Analizando respuesta del usuario")
             response = await self.llm.ainvoke(formatted_prompt)
             
-            # Parsear respuesta
-            analysis = self.parser.parse(response.content)
+            self.logger.debug(f"🔍 Respuesta LLM bruta: {response.content}")
+            
+            # Usar parser robusto mejorado
+            try:
+                analysis = self.robust_parser.parse(response.content)
+                
+                # Convertir dict a UserResponseAnalysis si es necesario
+                if isinstance(analysis, dict):
+                    analysis = UserResponseAnalysis(**analysis)
+                    
+            except Exception as parse_error:
+                self.logger.warning(f"⚠️ Parser falló, usando análisis de emergencia: {parse_error}")
+                analysis = self._emergency_analysis(user_message, current_stage, state)
             
             self.logger.info(f"📊 Análisis: Cancelar={analysis.wants_to_cancel}, Email={analysis.has_email}")
             
@@ -235,18 +397,146 @@ Para ayudarte, necesito identificarte. ¿Podrías decirme tu **email corporativo
             
         except Exception as e:
             self.logger.error(f"❌ Error en análisis LLM: {e}")
-            # Análisis por defecto en caso de error
-            return UserResponseAnalysis(
-                wants_to_cancel=False,
-                has_email=False,
-                has_name=False,
-                has_store_code=False,
-                has_store_name=False,
-                has_section=False,
-                missing_fields=["información"],
-                next_message="¿Podrías repetir la información, por favor?"
-            )
-    
+            return self._emergency_analysis(user_message, current_stage, state)
+
+
+    # =============================================================================
+    # FUNCIÓN MEJORADA PARA _analyze_user_response EN nodes/authenticate.py
+    # =============================================================================
+
+    def _emergency_analysis(self, user_message: str, current_stage: str, state: EroskiState) -> UserResponseAnalysis:
+        """
+        Análisis de emergencia cuando el LLM falla - MEJORADO CON CONTEXTO
+        """
+        self.logger.info("🚨 Ejecutando análisis de emergencia")
+        
+        # Obtener contexto del historial
+        messages = state.get("messages", [])
+        conversation_history = []
+        for msg in messages:
+            if hasattr(msg, 'content'):
+                conversation_history.append(msg.content)
+        
+        # Analizar en contexto
+        user_message_lower = user_message.lower()
+        
+        # Detectar cancelación
+        cancel_keywords = ["cancelar", "salir", "no quiero", "déjalo", "olvídalo", "adiós"]
+        wants_to_cancel = any(keyword in user_message_lower for keyword in cancel_keywords)
+        
+        # Detectar información específica
+        has_email = bool(re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', user_message))
+        
+        # Detectar nombre (mejorado con contexto)
+        has_name = self._detect_name_in_context(user_message, conversation_history, current_stage)
+        
+        # Detectar códigos/nombres de tienda
+        has_store_code = bool(re.search(r'\b[A-Z]{2,4}\d{2,4}\b|T\d{3,4}|ERO_\w+', user_message))
+        has_store_name = any(keyword in user_message_lower for keyword in [
+            "eroski", "tienda", "centro", "hipermercado", "supermercado"
+        ])
+        
+        # Detectar sección
+        has_section = any(keyword in user_message_lower for keyword in [
+            "carnicería", "pescadería", "panadería", "caja", "almacén", "sección"
+        ])
+        
+        # Determinar campos faltantes basado en la etapa
+        missing_fields = self._determine_missing_fields(
+            current_stage, has_email, has_name, has_store_code, has_store_name, has_section
+        )
+        
+        # Generar mensaje contextual
+        next_message = self._generate_contextual_message(current_stage, missing_fields)
+        
+        return UserResponseAnalysis(
+            wants_to_cancel=wants_to_cancel,
+            has_email=has_email,
+            has_name=has_name,
+            has_store_code=has_store_code,
+            has_store_name=has_store_name,
+            has_section=has_section,
+            missing_fields=missing_fields,
+            next_message=next_message
+        )
+
+    def _detect_name_in_context(self, user_message: str, conversation_history: list, current_stage: str) -> bool:
+        """
+        Detectar nombre considerando el contexto de la conversación.
+        """
+        # Si estamos en la etapa de pedir nombre y el usuario responde algo que parece un nombre
+        if current_stage in ["not_found_in_db", "requesting_name"]:
+            # Patrones de nombre
+            name_patterns = [
+                r'\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+',  # Nombre Apellido
+                r'^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+$',  # Solo nombre
+            ]
+            
+            for pattern in name_patterns:
+                if re.search(pattern, user_message.strip()):
+                    return True
+        
+        return False
+
+    def _determine_missing_fields(self, current_stage: str, has_email: bool, has_name: bool, 
+                                has_store_code: bool, has_store_name: bool, has_section: bool) -> list:
+        """
+        Determinar qué campos faltan basado en la etapa actual.
+        """
+        missing = []
+        
+        if current_stage == "requesting_email" and not has_email:
+            missing.append("email")
+        elif current_stage == "not_found_in_db" and not has_name:
+            missing.append("nombre")
+        elif current_stage == "requesting_incident_store" and not (has_store_code or has_store_name):
+            missing.append("tienda")
+        elif current_stage == "requesting_section" and not has_section:
+            missing.append("sección")
+        
+        return missing
+
+    def _generate_contextual_message(self, current_stage: str, missing_fields: list) -> str:
+        """
+        Generar mensaje contextual basado en la etapa y campos faltantes.
+        """
+        if "email" in missing_fields:
+            return "¿Podrías decirme tu email corporativo de Eroski?"
+        elif "nombre" in missing_fields:
+            return "Perfecto, ¿y tu nombre completo?"
+        elif "tienda" in missing_fields:
+            return "¿Podrías decirme el código y nombre de la tienda donde ocurrió?"
+        elif "sección" in missing_fields:
+            return "¿En qué sección específica ha tenido lugar la incidencia?"
+        else:
+            return "Perfecto, continuemos con los datos de la incidencia."
+
+    def _create_fallback_analysis(self, user_message: str, current_stage: str) -> UserResponseAnalysis:
+        """Crear análisis de emergencia cuando todo falla."""
+        self.logger.warning("🚨 Usando análisis de emergencia")
+        
+        # Análisis básico por texto
+        message_lower = user_message.lower()
+        wants_to_cancel = any(word in message_lower for word in ['cancelar', 'salir', 'no quiero', 'adiós'])
+        has_email = '@eroski.es' in user_message or '@' in user_message
+        
+        return UserResponseAnalysis(
+            wants_to_cancel=wants_to_cancel,
+            has_email=has_email,
+            has_name=False,
+            has_store_code=False,
+            has_store_name=False,
+            has_section=False,
+            confirmed_same_store=None,
+            email=None,
+            name=None,
+            store_code=None,
+            store_name=None,
+            section=None,
+            missing_fields=["información"],
+            next_message="¿Podrías repetir la información, por favor?"
+        )
+
     def _get_last_user_message(self, state: EroskiState) -> str:
         """Obtener último mensaje del usuario"""
         messages = state.get("messages", [])
@@ -327,7 +617,7 @@ Responde **"sí"** si es en tu tienda registrada, o **"no"** si es en otra tiend
             "department": employee.get('department'),
             "authenticated": True,
             "authentication_stage": "confirming_store",
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "attempts": state.get("attempts", 0) + 1,
             "last_activity": datetime.now()
@@ -346,7 +636,7 @@ Para procesar tu incidencia necesito algunos datos más:
             "authenticated": False,  # No está en BD, pero podemos continuar
             "authentication_stage": "not_found_in_db",
             "temp_user": True,  # Marcar como usuario temporal
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "attempts": state.get("attempts", 0) + 1,
             "last_activity": datetime.now()
@@ -387,7 +677,7 @@ Para procesar tu incidencia necesito algunos datos más:
             message = analysis.next_message
         
         updates.update({
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "last_activity": datetime.now()
         })
@@ -421,7 +711,7 @@ Para procesar tu incidencia necesito algunos datos más:
 Por favor responde **"sí"** o **"no"**. 😊"""
         
         updates.update({
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "last_activity": datetime.now()
         })
@@ -453,7 +743,7 @@ Por favor responde **"sí"** o **"no"**. 😊"""
             message = "Necesito más información sobre la tienda. ¿Podrías decirme el **nombre completo de la tienda**? (ej: 'Eroski Bilbao Centro', 'Hipermercado Eroski Getxo')"
         
         updates.update({
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "last_activity": datetime.now()
         })
@@ -488,7 +778,7 @@ Por favor responde **"sí"** o **"no"**. 😊"""
 ¿En cuál de estas u otra sección ha ocurrido? 😊"""
             
             updates.update({
-                "messages": state.get("messages", []) + [AIMessage(content=message)],
+                "messages": [AIMessage(content=message)],
                 "awaiting_user_input": True,
                 "last_activity": datetime.now()
             })
@@ -517,7 +807,7 @@ Por favor responde **"sí"** o **"no"**. 😊"""
         updates = {
             "authentication_stage": "completed",
             "awaiting_user_input": True,
-            "messages": state.get("messages", []) + [AIMessage(content=confirmation_message)],
+            "messages": [AIMessage(content=confirmation_message)],
             "last_activity": datetime.now(),
             "ready_for_classification": True
         }
@@ -541,7 +831,7 @@ Si confirmas, cerraré esta conversación. Si cambias de opinión, simplemente e
         
         return Command(update={
             "authentication_stage": "confirming_cancellation",
-            "messages": state.get("messages", []) + [AIMessage(content=confirmation_message)],
+            "messages": [AIMessage(content=confirmation_message)],
             "awaiting_user_input": True,
             "last_activity": datetime.now()
         })
@@ -562,7 +852,7 @@ O puedes intentar una vez más con tu **email completo de Eroski** (que termine 
             message = analysis.next_message or "Por favor, proporciona tu email corporativo de Eroski (debe terminar en @eroski.es). 😊"
         
         return Command(update={
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "attempts": attempts + 1,
             "last_activity": datetime.now()
@@ -573,7 +863,7 @@ O puedes intentar una vez más con tu **email completo de Eroski** (que termine 
         message = analysis.next_message or "¿Podrías proporcionar más información, por favor?"
         
         return Command(update={
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "attempts": state.get("attempts", 0) + 1,
             "last_activity": datetime.now()
@@ -597,7 +887,7 @@ Hemos intentado recopilar la información {self.max_attempts} veces. Te conectar
             "escalation_needed": True,
             "escalation_reason": f"Máximo de intentos alcanzado en autenticación ({self.max_attempts})",
             "escalation_level": "technical_support",
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": False,
             "last_activity": datetime.now()
         })
@@ -609,7 +899,7 @@ Hemos intentado recopilar la información {self.max_attempts} veces. Te conectar
         return Command(update={
             "escalation_needed": True,
             "escalation_reason": "Estado inconsistente en proceso de autenticación",
-            "messages": state.get("messages", []) + [AIMessage(content="Ha ocurrido un error técnico. Te derivaré a un especialista.")],
+            "messages": [AIMessage(content="Ha ocurrido un error técnico. Te derivaré a un especialista.")],
             "awaiting_user_input": False,
             "last_activity": datetime.now()
         })
@@ -635,7 +925,7 @@ Ha ocurrido un problema durante la autenticación.
             "last_error": error,
             "escalation_needed": True,
             "escalation_reason": f"Error técnico en autenticación: {error}",
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": False,
             "last_activity": datetime.now()
         })

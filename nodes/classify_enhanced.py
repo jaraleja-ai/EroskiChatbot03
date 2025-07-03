@@ -26,6 +26,10 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
 
+import inspect
+frame = inspect.currentframe().f_back
+lineno= frame.f_lineno
+
 class IncidentAnalysisResult(BaseModel):
     """Resultado del análisis de incidencia por LLM"""
     incident_detected: bool = Field(description="Si se detectó información de incidencia")
@@ -48,8 +52,10 @@ class ClassifyQueryNodeEnhanced(BaseNode):
         # Parser para respuesta del LLM
         self.parser = JsonOutputParser(pydantic_object=IncidentAnalysisResult)
         
+
+    
         # Prompt para análisis de incidencias
-        self.analysis_prompt = PromptTemplate(
+        self.analysis_prompt_backup = PromptTemplate(
             template="""Eres un experto en análisis de incidencias técnicas de Eroski.
 
 Tu tarea es analizar el historial de mensajes del usuario para identificar si hay información sobre una incidencia técnica.
@@ -80,6 +86,53 @@ CRITERIOS PARA DETECTAR INCIDENCIA:
             partial_variables={"format_instructions": self.parser.get_format_instructions()}
         )
     
+
+        # Buscar analysis_prompt (línea ~50-60) y actualizar:
+        self.analysis_prompt = PromptTemplate(
+            template="""Eres un asistente experto en procesar respuestas de empleados de Eroski.
+
+        Tu tarea es analizar la respuesta del usuario y extraer información para el proceso de autenticación e incidencias.
+
+        DATOS QUE NECESITAMOS RECOPILAR:
+        - Email corporativo (@eroski.es)
+        - Nombre completo
+        - Código de tienda (ej: "T001", "ERO_BCN", etc.)
+        - Nombre de tienda (ej: "Eroski Bilbao Centro")
+        - Sección donde ocurrió la incidencia (ej: "Carnicería", "Caja", "Almacén")
+
+        INFORMACIÓN ACTUAL YA RECOPILADA:
+        {current_data}
+
+        ETAPA ACTUAL: {current_stage}
+
+        MENSAJE DEL USUARIO:
+        "{user_message}"
+
+        INSTRUCCIONES CRÍTICAS:
+        1. DEVUELVE SIEMPRE UN JSON VÁLIDO CON TODOS LOS CAMPOS
+        2. Usa null para valores no encontrados
+        3. Usa [] para listas vacías
+        4. Usa false/true para booleanos
+
+        FORMATO DE RESPUESTA OBLIGATORIO:
+        ```json
+        {{
+            "wants_to_cancel": false,
+            "has_email": false,
+            "has_name": false,
+            "has_store_code": false,
+            "has_store_name": false,
+            "has_section": false,
+            "confirmed_same_store": null,
+            "email": null,
+            "name": null,
+            "store_code": null,
+            "store_name": null,
+            "section": null,
+            "missing_fields": [],
+            "next_message": "Mensaje natural para continuar"
+        }}""")
+
     def get_required_fields(self) -> List[str]:
         return ["messages", "authenticated"]
     
@@ -250,7 +303,7 @@ Puedes contarme sobre:
         update_data = NodeVisitManager.update_execution_path(state, self.name)
         update_data.update({
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "classification_stage": "requesting_initial_info"
         })
@@ -275,7 +328,7 @@ Puedes contarme sobre:
         
         update_data.update({
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "classification_stage": "requesting_details",
             "llm_analysis": analysis.dict()
@@ -323,7 +376,7 @@ Por favor, incluye **todos** estos detalles:
         
         update_data.update({
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "classification_stage": "requesting_specific_details"
         })
@@ -364,7 +417,7 @@ No he podido identificar claramente tu problema después de varios intentos.
             "escalation_reason": "No se pudo clasificar la consulta después de múltiples intentos",
             "escalation_level": "technical_support",
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=formatted_message)],
+            "messages": [AIMessage(content=formatted_message)],
             "awaiting_user_input": False,
             "classification_stage": "escalated"
         })
@@ -390,7 +443,7 @@ Si prefieres hablar directamente con alguien:
         update_data = NodeVisitManager.update_execution_path(state, self.name)
         update_data.update({
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "classification_stage": "waiting_response"
         })
@@ -421,7 +474,7 @@ Ha ocurrido un problema al procesar tu consulta.
             "escalation_needed": True,
             "escalation_reason": f"Error técnico en clasificación: {error_message}",
             "current_node": self.name,
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": False
         }
         

@@ -20,8 +20,14 @@ from models.eroski_state import EroskiState, ConsultaType
 from .base_workflow import BaseWorkflow
 
 # Importar nodos usando el sistema de fallback
-from nodes.authenticate_enhanced import authenticate_employee_node
+from nodes.authenticate_llm_driven import llm_driven_authenticate_node
 from nodes.classify_enhanced import classify_query_node
+from nodes.finalize import finalize_conversation_node
+from nodes.verify import verify_resolution_node
+from nodes.escalate import escalate_supervisor_node
+from nodes.search_knowledge import search_knowledge_node
+from nodes.search_solution import search_solution_node
+from nodes.collect_incident import collect_incident_details_node
 
 
 class EroskiFinalWorkflow(BaseWorkflow):
@@ -50,117 +56,327 @@ class EroskiFinalWorkflow(BaseWorkflow):
         - AuthenticateNodeEnhanced: Recopila toda la información necesaria
         - ClassifyQueryNodeEnhanced: Análisis LLM de incidencias
         """
-        
+   
+
+
     def build_graph(self) -> StateGraph:
         """
-        Construir el grafo con nodos mejorados.
-        """
-        self.logger.info("🏗️ Construyendo grafo con nodos mejorados")
+        Construir el grafo principal con nodo LLM-driven integrado.
         
-        # Crear grafo
+        Returns:
+            Grafo compilado con checkpointer y persistencia
+        """
+        self.logger.info("🔨 Construyendo grafo principal de Eroski con LLM-driven...")
+        
+        # Crear grafo con el estado
         graph = StateGraph(EroskiState)
         
-        # ========== AGREGAR NODOS CON FALLBACK AUTOMÁTICO ==========
+        # ========== CREAR INSTANCIAS DE NODOS ==========
+        try:
+            # NUEVO: Importar nodo LLM-driven
+            
+            # NUEVO: Usar instancia única para el nodo de autenticación
+            graph.add_node("authenticate", llm_driven_authenticate_node)
+            
+            # Nodos existentes usando funciones wrapper
+            graph.add_node("classify", classify_query_node)
+            graph.add_node("collect_incident", collect_incident_details_node)
+            graph.add_node("search_solution", search_solution_node)
+            graph.add_node("search_knowledge", search_knowledge_node)
+            graph.add_node("escalate", escalate_supervisor_node)
+            graph.add_node("verify", verify_resolution_node)
+            graph.add_node("finalize", finalize_conversation_node)
+            
+            self.logger.info("✅ Todos los nodos agregados correctamente (LLM-driven integrado)")
+            
+        except ImportError as e:
+            self.logger.error(f"❌ Error importando nodos: {e}")
+            # Fallback: usar nodos mock para desarrollo
+            self._add_mock_nodes(graph)
         
-        # Obtener mejores nodos disponibles
-        # Nodo de autenticación (mejorado o básico)
-        graph.add_node("authenticate", authenticate_employee_node)
-        
-        # Nodo de clasificación (mejorado o básico)
-        graph.add_node("classify", classify_query_node)
-        
-        # Nodos adicionales (pueden ser mock por ahora)
-        graph.add_node("collect_incident", self._mock_collect_incident)
-        graph.add_node("search_knowledge", self._mock_search_knowledge)
-        graph.add_node("escalate", self._mock_escalate)
-        graph.add_node("finalize", self._mock_finalize)
-        
-        # ========== DEFINIR FLUJO CON ROUTING MEJORADO ==========
+        # ========== DEFINIR FLUJO CON NODO LLM-DRIVEN ==========
         
         # Punto de entrada
         graph.add_edge(START, "authenticate")
         
-        # AUTHENTICATE: Routing mejorado
+        # NUEVO: AUTHENTICATE con router LLM-driven
         graph.add_conditional_edges(
             "authenticate",
-            self.route_authenticate_enhanced,
+            self.route_authenticate_llm_driven_with_validation,  # Router mejorado
             {
-                "continue": "classify",           # ✅ Información completa
-                "need_input": END,                # 🔄 Esperando respuesta del usuario
-                "cancelled": END,                 # 🚫 Usuario canceló
-                "escalate": "escalate"            # ⚠️ Error o máximo intentos
+                "continue": "classify",      # Autenticación completa → Clasificar consulta
+                "need_input": END,           # Esperando input del usuario → Terminar y esperar
+                "escalate": "escalate",      # Error/límite → Escalar a supervisor
+                "cancelled": END             # Usuario canceló → Terminar conversación
             }
         )
         
-        # CLASSIFY: Routing mejorado
+        # CLASSIFY: Puede solicitar clarificación y terminar, o continuar
         graph.add_conditional_edges(
             "classify",
-            self.route_classify_enhanced,
+            self.route_classify,
             {
-                "collect_details": "collect_incident",  # 📋 Incidencia detectada
-                "need_clarification": END,              # ❓ Necesita más info
-                "cancelled": END,                       # 🚫 Usuario canceló
-                "escalate": "escalate"                  # ⚠️ No se pudo clasificar
+                "incident": "collect_incident",  # Es incidencia
+                "query": "search_knowledge",     # Es consulta
+                "urgent": "escalate",            # Es urgente
+                "need_clarification": END,       # 🎯 RAMA A END: Necesita clarificación
+                "escalate": "escalate"           # No se pudo clasificar
             }
         )
         
-        # COLLECT_INCIDENT: Flujo básico por ahora
+        # COLLECT_INCIDENT: Puede solicitar más detalles y terminar, o continuar
         graph.add_conditional_edges(
             "collect_incident",
             self.route_collect_incident,
             {
-                "search_solution": "search_knowledge",
-                "need_details": END,
-                "escalate": "escalate"
+                "search_solution": "search_solution",  # Buscar solución
+                "escalate": "escalate",                # Muy complejo
+                "need_details": END                    # 🎯 RAMA A END: Necesita más detalles
             }
         )
         
-        # SEARCH_KNOWLEDGE: Flujo básico
+        # SEARCH_SOLUTION: Buscar solución en base de conocimiento
+        graph.add_conditional_edges(
+            "search_solution",
+            self.route_search_solution,
+            {
+                "solution_found": "verify",    # Solución encontrada
+                "escalate": "escalate",        # No hay solución
+                "need_clarification": END      # 🎯 RAMA A END: Necesita clarificación
+            }
+        )
+        
+        # SEARCH_KNOWLEDGE: Para consultas generales
         graph.add_conditional_edges(
             "search_knowledge",
             self.route_search_knowledge,
             {
-                "resolved": "finalize",
-                "escalate": "escalate",
-                "need_clarification": END
+                "information_provided": "finalize",  # Información proporcionada
+                "escalate": "escalate",               # No se encontró información
+                "need_clarification": END             # 🎯 RAMA A END: Necesita clarificación
             }
         )
         
-        # ESCALATE y FINALIZE van a END
-        graph.add_edge("escalate", "finalize")
+        # VERIFY: Verificar si la solución funcionó
+        graph.add_conditional_edges(
+            "verify",
+            self.route_verify,
+            {
+                "resolved": "finalize",        # Problema resuelto
+                "not_resolved": "escalate",    # No funcionó la solución
+                "need_feedback": END           # 🎯 RAMA A END: Esperando feedback
+            }
+        )
+        
+        # ESCALATE y FINALIZE terminan en END
+        graph.add_edge("escalate", END)
         graph.add_edge("finalize", END)
         
-        self.logger.info("✅ Grafo construido con nodos mejorados")
+        self.logger.info("✅ Grafo construido exitosamente con nodo LLM-driven")
         
         return graph
-    
+
     # ========== ROUTING FUNCTIONS MEJORADAS ==========
-    
-    def route_authenticate_enhanced(self, state: EroskiState) -> Literal["continue", "need_input", "cancelled", "escalate"]:
+    def route_authenticate_llm_driven(self, state: EroskiState) -> Literal["continue", "need_input", "escalate", "cancelled"]:
         """
-        Routing mejorado para nodo de autenticación.
-        """
-        self.logger.info("🔄 Routing authenticate enhanced")
+        Router mejorado para el nodo de autenticación LLM-driven.
         
-        # Verificar cancelación
-        if state.get("cancelled"):
-            self.logger.info("🚫 Usuario canceló en autenticación")
+        Args:
+            state: Estado actual del workflow
+            
+        Returns:
+            Siguiente nodo o acción a ejecutar
+        """
+        
+        # Log del estado actual para debugging
+        self.logger.debug(f"🔍 Routing authenticate - Estado: {state.get('authentication_stage', 'no_stage')}")
+        
+        # 1. Verificar cancelación confirmada
+        if (state.get("user_cancelled") or 
+            state.get("conversation_cancelled") or
+            state.get("awaiting_cancellation_confirmation")):
+            self.logger.info("🚫 Usuario canceló la conversación")
             return "cancelled"
         
-        # Verificar escalación
-        if state.get("escalation_needed"):
-            self.logger.info("⚠️ Escalación necesaria en autenticación")
+        # 2. Verificar si necesita input del usuario
+        if state.get("awaiting_user_input"):
+            self.logger.debug("⏳ Esperando input del usuario")
+            return "need_input"
+        
+        # 3. Verificar escalación por errores o límite de intentos
+        escalation_conditions = [
+            state.get("escalation_needed"),
+            state.get("attempts", 0) >= 5,
+            state.get("fallback_mode") and state.get("attempts", 0) >= 3,
+            state.get("error_count", 0) >= 3
+        ]
+        
+        if any(escalation_conditions):
+            escalation_reason = "Límite de intentos o errores críticos en autenticación"
+            self.logger.warning(f"🔼 Escalando: {escalation_reason}")
+            
+            # Actualizar estado con información de escalación
+            state.update({
+                "escalation_needed": True,
+                "escalation_reason": escalation_reason,
+                "escalation_level": "supervisor"
+            })
             return "escalate"
         
-        # Verificar si está listo para continuar
-        if state.get("ready_for_classification"):
-            self.logger.info("✅ Autenticación completa - continuando a clasificación")
+        # 4. Verificar si la autenticación está completa
+        authentication_complete = (
+            state.get("authentication_stage") == "completed" and
+            state.get("datos_usuario_completos") and
+            state.get("ready_for_classification") and
+            state.get("employee_name") and
+            state.get("incident_store_name") and
+            state.get("incident_section")
+        )
+        
+        if authentication_complete:
+            self.logger.info("✅ Autenticación completada, continuando a clasificación")
+            
+            # Registrar métricas de autenticación
+            self._log_authentication_metrics(state)
+            
             return "continue"
         
-        # Por defecto, necesita más input del usuario
-        self.logger.info("🔄 Esperando más información del usuario")
+        # 5. Por defecto, necesita más input del usuario
+        self.logger.debug("📝 Autenticación en proceso, necesita más input")
         return "need_input"
-    
+
+    def route_authenticate_llm_driven_with_validation(self, state: EroskiState) -> Literal["continue", "need_input", "escalate", "cancelled"]:
+        """
+        Router con validación previa del estado.
+        Este es el router principal que se usa en el workflow.
+        """
+        
+        # 1. Validar estado antes de routing
+        if not self.validate_auth_state_before_routing(state):
+            self.logger.error("❌ Estado inválido, escalando")
+            return "escalate"
+        
+        # 2. Logging de debugging si está habilitado
+        if self.logger.isEnabledFor(logging.DEBUG):
+            debug_info = self.debug_authentication_state(state)
+            self.logger.debug(f"🔍 Debug autenticación: {debug_info}")
+        
+        # 3. Ejecutar routing principal
+        return self.route_authenticate_llm_driven(state)
+
+
+    def _log_authentication_metrics(self, state: EroskiState):
+        """Registrar métricas del proceso de autenticación"""
+        
+        try:
+            metrics = {
+                "session_id": state.get("session_id"),
+                "employee_name": state.get("employee_name"),
+                "total_attempts": state.get("attempts", 0),
+                "found_in_database": state.get("found_in_database", False),
+                "fallback_used": state.get("fallback_mode", False),
+                "completion_method": "llm_driven",
+                "authentication_efficiency": self._calculate_auth_efficiency(state)
+            }
+            
+            self.logger.info(f"📊 Métricas de autenticación LLM: {metrics}")
+            
+            # Guardar métricas en el estado para análisis posterior
+            state["authentication_metrics"] = metrics
+            
+        except Exception as e:
+            self.logger.warning(f"⚠️ Error registrando métricas: {e}")
+
+    def _calculate_auth_efficiency(self, state: EroskiState) -> str:
+        """Calcular eficiencia del proceso de autenticación"""
+        
+        attempts = state.get("attempts", 0)
+        
+        if attempts == 1:
+            return "excellent"  # Todo en un intercambio
+        elif attempts <= 2:
+            return "good"      # 2 intercambios
+        elif attempts <= 3:
+            return "fair"      # 3 intercambios
+        else:
+            return "poor"      # Más de 3 intercambios
+
+    # =============================================================================
+    # FUNCIÓN AUXILIAR PARA DEBUGGING
+    # =============================================================================
+
+    def debug_authentication_state(self, state: EroskiState) -> Dict[str, Any]:
+        """
+        Función de debugging para inspeccionar el estado de autenticación.
+        
+        Args:
+            state: Estado actual
+            
+        Returns:
+            Resumen del estado de autenticación
+        """
+        
+        return {
+            "authentication_stage": state.get("authentication_stage"),
+            "datos_usuario_completos": state.get("datos_usuario_completos"),
+            "awaiting_user_input": state.get("awaiting_user_input"),
+            "attempts": state.get("attempts"),
+            "fallback_mode": state.get("fallback_mode"),
+            "escalation_needed": state.get("escalation_needed"),
+            "auth_data_collected": state.get("auth_data_collected", {}),
+            "employee_name": state.get("employee_name"),
+            "incident_store_name": state.get("incident_store_name"),
+            "incident_section": state.get("incident_section"),
+            "found_in_database": state.get("found_in_database"),
+            "ready_for_classification": state.get("ready_for_classification")
+        }
+
+    # =============================================================================
+    # VALIDADOR DE ESTADO PRE-ROUTING
+    # =============================================================================
+
+    def validate_auth_state_before_routing(self, state: EroskiState) -> bool:
+        """
+        Validar que el estado sea consistente antes del routing.
+        
+        Args:
+            state: Estado a validar
+            
+        Returns:
+            True si el estado es válido
+        """
+        
+        try:
+            # Verificar campos críticos
+            required_fields = ["messages", "session_id"]
+            for field in required_fields:
+                if field not in state:
+                    self.logger.error(f"❌ Campo crítico faltante: {field}")
+                    return False
+            
+            # Verificar consistencia de autenticación
+            if state.get("authentication_stage") == "completed":
+                if not state.get("datos_usuario_completos"):
+                    self.logger.warning("⚠️ Inconsistencia: authentication_stage=completed pero datos_usuario_completos=False")
+                    # Intentar corregir
+                    state["datos_usuario_completos"] = True
+            
+            # Verificar que los attempts no sean negativos
+            if state.get("attempts", 0) < 0:
+                self.logger.warning("⚠️ Corrigiendo attempts negativo")
+                state["attempts"] = 0
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error validando estado de autenticación: {e}")
+            return False
+
+
+    # =============================================================================
+    # ROUTER MEJORADO CON VALIDACIÓN
+    # =============================================================================
+
     def route_classify_enhanced(self, state: EroskiState) -> Literal["collect_details", "need_clarification", "cancelled", "escalate"]:
         """
         Routing mejorado para nodo de clasificación.
@@ -247,7 +463,7 @@ Para ayudarte mejor, necesito algunos detalles adicionales:
         
         return Command(update={
             "current_node": "collect_incident",
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "awaiting_user_input": True,
             "last_activity": datetime.now(),
             "incident_details": {"stage": "collecting"}
@@ -277,7 +493,7 @@ Por ahora te derivaré a soporte técnico:
         
         return Command(update={
             "current_node": "search_knowledge",
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "escalation_needed": True,
             "escalation_reason": "Nodo search_knowledge en desarrollo",
             "last_activity": datetime.now()
@@ -311,7 +527,7 @@ Un especialista te atenderá pronto. ¡Gracias por tu paciencia! 🙏"""
         
         return Command(update={
             "current_node": "escalate",
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "escalated": True,
             "awaiting_user_input": False,
             "last_activity": datetime.now()
@@ -346,7 +562,7 @@ Si necesitas más ayuda, no dudes en contactarnos nuevamente.
         
         return Command(update={
             "current_node": "finalize",
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "conversation_ended": True,
             "awaiting_user_input": False,
             "last_activity": datetime.now()

@@ -225,7 +225,7 @@ class CollectIncidentDetailsNode(BaseNode):
         message = self._build_missing_info_message(missing_fields, state)
         
         return Command(update={
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "attempts": attempts + 1,
             "awaiting_user_input": True,
             "current_node": "collect_incident",
@@ -312,7 +312,7 @@ Por favor, proporciona esta información para continuar. 🙏"""
             "ticket_number": ticket_number,
             "incident_data": incident_data,
             "incident_status": "Abierta",
-            "messages": state.get("messages", []) + [AIMessage(content=confirmation_message)],
+            "messages": [AIMessage(content=confirmation_message)],
             "awaiting_user_input": False,
             "current_node": "collect_incident",
             "last_activity": datetime.now(),
@@ -384,7 +384,7 @@ Por favor, proporciona esta información para continuar. 🙏"""
             "escalation_needed": True,
             "escalation_reason": f"Información incompleta después de múltiples intentos. Falta: {', '.join(missing_fields)}",
             "escalation_level": "supervisor",
-            "messages": state.get("messages", []) + [AIMessage(content=escalation_message)],
+            "messages": [AIMessage(content=escalation_message)],
             "current_node": "collect_incident",
             "last_activity": datetime.now(),
             "awaiting_user_input": False
@@ -396,7 +396,7 @@ Por favor, proporciona esta información para continuar. 🙏"""
             "escalation_needed": True,
             "escalation_reason": f"Error técnico recopilando información: {error_message}",
             "escalation_level": "technical",
-            "messages": state.get("messages", []) + [
+            "messages": [
                 AIMessage(content="Ha ocurrido un error técnico. Te derivo a soporte técnico.")
             ],
             "current_node": "collect_incident",

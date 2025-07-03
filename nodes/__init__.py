@@ -6,7 +6,7 @@ from .base_node import BaseNode
 
 # ========== IMPORTS CON MANEJO DE ERRORES ==========
 try:
-    from .authenticate_enhanced import authenticate_employee_node
+    from .authenticate_llm_driven import authenticate_employee_node
     AUTHENTICATE_AVAILABLE = True
     print("✅ authenticate disponible")
 except ImportError as e:

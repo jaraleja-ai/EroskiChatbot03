@@ -1,265 +1,496 @@
-from typing import TypedDict, List, Optional, Any, Dict, Tuple
-from langchain_core.messages import BaseMessage
+# =============================================================================
+# INTEGRACIÓN DEL NODO LLM-DRIVEN EN EL WORKFLOW
+# =============================================================================
 
-# Definición del tipo para la tupla de interrupción
-InterruptionTrip = Tuple[str, str, str]  # (origen, destino, sentido)
+# 1. ACTUALIZAR workflow/eroski_main_workflow.py
+"""
+Reemplazar la importación del nodo de autenticación:
 
-class EroskiState(TypedDict, total=False):
+ANTES:
+from nodes.authenticate import AuthenticateEmployeeNodeComplete
+
+DESPUÉS:
+from nodes.authenticate_llm_driven import LLMDrivenAuthenticateNode
+
+Y en la función _add_nodes:
+authenticate_node = LLMDrivenAuthenticateNode()
+graph.add_node("authenticate", authenticate_node.execute)
+"""
+
+# =============================================================================
+# 2. CONFIGURACIÓN DE RUTAS EN EL WORKFLOW
+# =============================================================================
+
+def route_authenticate_llm_driven(state: EroskiState) -> str:
     """
-    🏗️ Estado del grafo híbrido - Versión corregida para evitar bucles
-    
-    CAMPOS DE CONTROL DE FLUJO:
-    - _actor_decision: Decisión del último actor ejecutado
-    - _next_actor: Siguiente actor según la decisión
-    - _execution_count: Contador para prevenir bucles infinitos
-    - awaiting_input: Indica si el flujo está esperando input del usuario
-    - interruption_trip: Tupla para manejar interrupciones (origen, destino, sentido)
-    """
-    
-    # ✅ CONTROL DE FLUJO Y ROUTING
-    _actor_decision: Optional[str]          # 'need_input', 'continue', 'escalate', etc.
-    _next_actor: Optional[str]              # Próximo nodo/actor a ejecutar
-    _execution_count: int                   # Contador de ejecuciones (anti-bucle)
-    _last_processed_message: str            # Último mensaje procesado (anti-repetición)
-    _request_message: Optional[str]         # Mensaje a mostrar al usuario
-    _input_context: Optional[Dict[str, Any]] # Contexto de la solicitud de input
-    
-    # ⏸️ ESTADO DE INTERRUPCIÓN
-    awaiting_input: bool                    # True cuando esperamos input del usuario
-    current_step: Optional[str]             # Paso actual del flujo
-    next_action: Optional[str]              # Próxima acción a ejecutar
-    interruption_trip: Optional[InterruptionTrip]  # 🆕 Tupla de interrupción (origen, destino, sentido)
-    is_interrupted: bool                    # 🆕 Indica si hay una interrupción activa
-    router_context: Optional[Dict[str, Any]] # 🆕 Contexto del router para manejar interrupciones
-    
-    # 💬 MENSAJES Y COMUNICACIÓN
-    messages: List[BaseMessage]             # Historia de mensajes
-    
-    # 👤 DATOS DEL USUARIO
-    nombre: Optional[str]                   # Nombre del usuario
-    email: Optional[str]                    # Email corporativo
-    numero_empleado: Optional[str]          # Número de empleado
-    nombre_confirmado: bool                 # Si el nombre está confirmado
-    email_confirmado: bool                  # Si el email está confirmado
-    datos_usuario_completos: bool           # Si tenemos todos los datos necesarios
-    usuario_encontrado_bd: bool             # Si el usuario existe en BD
-    
-    # 🎫 DATOS DE LA INCIDENCIA
-    tipo_incidencia: Optional[str]          # Tipo de incidencia
-    descripcion_incidencia: Optional[str]   # Descripción detallada
-    prioridad_incidencia: Optional[str]     # Prioridad (alta, media, baja)
-    categoria_incidencia: Optional[str]     # Categoría de la incidencia
-    categoria_confirmada: bool              # Si la categoría está confirmada
-    descripcion_confirmada: bool            # Si la descripción está confirmada
-    solucion_aceptada: Optional[bool]       # Si el usuario aceptó la solución propuesta
-    
-    # 🔄 ESTADO DEL FLUJO
-    preguntas_contestadas: List[str]        # Preguntas ya respondidas
-    incidencia_resuelta: bool               # Si la incidencia está resuelta
-    intentos: int                           # Número de intentos
-    intentos_incidencia: int                # Intentos específicos de incidencia
-    
-    # 🔼 ESCALACIÓN
-    escalar_a_supervisor: bool              # Si debe escalarse
-    razon_escalacion: Optional[str]         # Razón de la escalación
-    
-    # 🏁 FINALIZACIÓN
-    flujo_completado: bool                  # Si el flujo está completado
-    
-    # 🔧 METADATA Y DEBUG
-    contexto_adicional: Optional[Dict[str, Any]]  # Contexto adicional
-    sesion_id: Optional[str]                # ID de la sesión
-    timestamp_inicio: Optional[str]         # Timestamp de inicio
-    error_info: Optional[Dict[str, Any]]    # Información de errores
-    flow_history: List[str]                 # Historia del flujo ejecutado
-
-
-# ==========================================
-# FUNCIONES AUXILIARES PARA INTERRUPTION_TRIP
-# ==========================================
-
-def create_interruption_trip(origen: str, destino: str, sentido: str) -> InterruptionTrip:
-    """
-    Crea una nueva tupla de interrupción.
+    Router mejorado para el nodo LLM-driven.
     
     Args:
-        origen: Nodo desde donde se origina la interrupción
-        destino: Nodo de destino de la interrupción  
-        sentido: 'ida' para ir a la interrupción, 'vuelta' para regresar
+        state: Estado actual
         
     Returns:
-        InterruptionTrip: Tupla (origen, destino, sentido)
-        
-    Example:
-        >>> trip = create_interruption_trip("router", "interruption_handler", "ida")
-        >>> print(trip)  # ("router", "interruption_handler", "ida")
+        Siguiente nodo a ejecutar
     """
-    return (origen, destino, sentido)
-
-
-def get_trip_info(trip: Optional[InterruptionTrip]) -> Dict[str, Optional[str]]:
-    """
-    Extrae información de la tupla de interrupción para facilitar su uso.
     
-    Args:
-        trip: Tupla de interrupción o None
-        
-    Returns:
-        Dict con las claves 'origen', 'destino', 'sentido'
-        
-    Example:
-        >>> trip = ("router", "interruption_handler", "ida")
-        >>> info = get_trip_info(trip)
-        >>> print(info)  # {"origen": "router", "destino": "interruption_handler", "sentido": "ida"}
-    """
-    if trip is None:
-        return {"origen": None, "destino": None, "sentido": None}
-    return {
-        "origen": trip[0],
-        "destino": trip[1], 
-        "sentido": trip[2]
-    }
-
-
-def is_return_trip(trip: Optional[InterruptionTrip]) -> bool:
-    """
-    Verifica si es un viaje de vuelta desde una interrupción.
+    # Verificar si necesita input del usuario
+    if state.get("awaiting_user_input"):
+        return "need_input"  # Termina en END para esperar respuesta
     
-    Args:
-        trip: Tupla de interrupción o None
-        
-    Returns:
-        bool: True si es un viaje de vuelta, False en caso contrario
-        
-    Example:
-        >>> trip_ida = ("router", "interruption_handler", "ida")
-        >>> trip_vuelta = ("interruption_handler", "router", "vuelta")
-        >>> print(is_return_trip(trip_ida))     # False
-        >>> print(is_return_trip(trip_vuelta))  # True
-    """
-    if trip is None:
-        return False
-    return trip[2] == "vuelta"
-
-
-def is_outbound_trip(trip: Optional[InterruptionTrip]) -> bool:
-    """
-    Verifica si es un viaje de ida hacia una interrupción.
+    # Verificar cancelación confirmada
+    if state.get("user_cancelled"):
+        return "cancelled"  # Termina en END
     
-    Args:
-        trip: Tupla de interrupción o None
-        
-    Returns:
-        bool: True si es un viaje de ida, False en caso contrario
-    """
-    if trip is None:
-        return False
-    return trip[2] == "ida"
-
-
-def get_trip_origin(trip: Optional[InterruptionTrip]) -> Optional[str]:
-    """
-    Obtiene el nodo de origen de la interrupción.
+    # Verificar escalación por errores
+    if state.get("escalation_needed"):
+        return "escalate"
     
-    Args:
-        trip: Tupla de interrupción o None
-        
-    Returns:
-        str: Nodo de origen o None si no hay trip
-    """
-    if trip is None:
-        return None
-    return trip[0]
-
-
-def get_trip_destination(trip: Optional[InterruptionTrip]) -> Optional[str]:
-    """
-    Obtiene el nodo de destino de la interrupción.
+    # Verificar si la autenticación está completa
+    if (state.get("authentication_stage") == "completed" and 
+        state.get("datos_usuario_completos")):
+        return "continue"  # Ir a classify
     
-    Args:
-        trip: Tupla de interrupción o None
-        
-    Returns:
-        str: Nodo de destino o None si no hay trip
-    """
-    if trip is None:
-        return None
-    return trip[1]
+    # Por defecto, continuar en el mismo nodo
+    return "need_input"
 
 
-def create_return_trip(original_trip: InterruptionTrip) -> InterruptionTrip:
-    """
-    Crea un trip de vuelta basado en un trip de ida.
+# =============================================================================
+# 3. PARSER JSON ROBUSTO PARA MANEJO DE ERRORES
+# =============================================================================
+
+import json
+import re
+from typing import Any, Dict
+
+class RobustLLMParser:
+    """Parser robusto para respuestas LLM con múltiples estrategias de fallback"""
     
-    Args:
-        original_trip: Trip original de ida
+    @staticmethod
+    def parse_llm_response(content: str) -> Dict[str, Any]:
+        """
+        Parsear respuesta LLM con estrategias de fallback.
         
-    Returns:
-        InterruptionTrip: Nuevo trip de vuelta
+        Args:
+            content: Contenido de la respuesta LLM
+            
+        Returns:
+            Diccionario parseado
+        """
         
-    Example:
-        >>> trip_ida = ("router", "interruption_handler", "ida")
-        >>> trip_vuelta = create_return_trip(trip_ida)
-        >>> print(trip_vuelta)  # ("interruption_handler", "router", "vuelta")
-    """
-    origen, destino, _ = original_trip
-    return (destino, origen, "vuelta")
-
-
-def clear_interruption_state(state: EroskiState) -> EroskiState:
-    """
-    Limpia el estado de interrupción cuando se completa el ciclo.
+        # Estrategia 1: JSON directo
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            pass
+        
+        # Estrategia 2: JSON en bloques markdown
+        json_patterns = [
+            r'```json\s*\n(.*?)\n```',  # ```json ... ```
+            r'```\s*\n(.*?)\n```',     # ``` ... ```
+        ]
+        
+        for pattern in json_patterns:
+            match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+            if match:
+                try:
+                    return json.loads(match.group(1).strip())
+                except json.JSONDecodeError:
+                    continue
+        
+        # Estrategia 3: Buscar JSON en cualquier parte
+        try:
+            start = content.find('{')
+            end = content.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                json_str = content[start:end+1]
+                return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+        
+        # Estrategia 4: Crear respuesta de fallback
+        return RobustLLMParser._create_emergency_response(content)
     
-    Args:
-        state: Estado actual del grafo
+    @staticmethod
+    def _create_emergency_response(content: str) -> Dict[str, Any]:
+        """Crear respuesta de emergencia cuando todo falla"""
         
-    Returns:
-        EroskiState: Estado actualizado sin información de interrupción
-    """
-    return {
-        **state,
-        "interruption_trip": None,
-        "is_interrupted": False,
-        "router_context": {}
-    }
+        content_lower = content.lower()
+        
+        # Detectar intención de cancelar
+        cancel_keywords = ["cancelar", "salir", "no quiero", "adiós", "olvídalo"]
+        wants_to_cancel = any(keyword in content_lower for keyword in cancel_keywords)
+        
+        # Detectar email
+        email_match = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', content)
+        
+        # Construir respuesta de emergencia
+        return {
+            "is_complete": False,
+            "should_search_database": bool(email_match),
+            "wants_to_cancel": wants_to_cancel,
+            "extracted_data": {"email": email_match.group()} if email_match else {},
+            "next_action": "cancel" if wants_to_cancel else "collect_data",
+            "message_to_user": "Disculpa, ¿podrías repetir la información?",
+            "missing_fields": ["información"],
+            "confidence_level": 0.3
+        }
 
 
-def has_active_interruption(state: EroskiState) -> bool:
-    """
-    Verifica si hay una interrupción activa en el estado.
+# =============================================================================
+# 4. INTEGRACIÓN EN EL PARSER DEL NODO
+# =============================================================================
+
+# Actualizar el método _get_llm_decision en LLMDrivenAuthenticateNode:
+
+async def _get_llm_decision_improved(self, state: EroskiState) -> ConversationDecision:
+    """Versión mejorada con parser robusto"""
     
-    Args:
-        state: Estado actual del grafo
+    try:
+        # Preparar contexto
+        context = self._build_conversation_context(state)
+        formatted_prompt = self.conversation_prompt.format(**context)
         
-    Returns:
-        bool: True si hay interrupción activa, False en caso contrario
-    """
-    return (
-        state.get("is_interrupted", False) or 
-        state.get("interruption_trip") is not None
+        # Invocar LLM
+        response = await self.llm.ainvoke(formatted_prompt)
+        
+        # Parser robusto
+        parsed_data = RobustLLMParser.parse_llm_response(response.content)
+        
+        # Convertir a ConversationDecision
+        decision = ConversationDecision(**parsed_data)
+        
+        self.logger.info(f"🎯 LLM decidió: {decision.next_action} (confianza: {decision.confidence_level})")
+        return decision
+        
+    except Exception as e:
+        self.logger.warning(f"⚠️ Error en decisión LLM: {e}")
+        return self._create_fallback_decision(state)
+
+
+# =============================================================================
+# 5. MÉTRICAS Y MONITOREO
+# =============================================================================
+
+class AuthenticationMetrics:
+    """Clase para recopilar métricas del proceso de autenticación"""
+    
+    @staticmethod
+    def log_authentication_metrics(state: EroskiState, node_logger):
+        """Registrar métricas del proceso de autenticación"""
+        
+        metrics = {
+            "total_attempts": state.get("attempts", 0),
+            "conversation_efficiency": AuthenticationMetrics._calculate_efficiency(state),
+            "data_collection_method": "database" if state.get("found_in_database") else "manual",
+            "completion_time": AuthenticationMetrics._calculate_completion_time(state),
+            "fallback_used": state.get("fallback_mode", False),
+            "llm_decision_count": state.get("llm_decisions_made", 0)
+        }
+        
+        node_logger.info(f"📊 Métricas de autenticación: {metrics}")
+        return metrics
+    
+    @staticmethod
+    def _calculate_efficiency(state: EroskiState) -> str:
+        """Calcular eficiencia del proceso"""
+        
+        attempts = state.get("attempts", 0)
+        if attempts == 1:
+            return "excellent"  # Todo en un intercambio
+        elif attempts <= 2:
+            return "good"      # 2 intercambios
+        elif attempts <= 3:
+            return "fair"      # 3 intercambios
+        else:
+            return "poor"      # Más de 3 intercambios
+    
+    @staticmethod
+    def _calculate_completion_time(state: EroskiState) -> int:
+        """Calcular tiempo de completado en minutos"""
+        
+        start_time = state.get("conversation_started_at")
+        end_time = state.get("last_activity")
+        
+        if start_time and end_time:
+            delta = end_time - start_time
+            return int(delta.total_seconds() / 60)
+        
+        return 0
+
+
+# =============================================================================
+# 6. VALIDACIONES Y CHECKS DE CALIDAD
+# =============================================================================
+
+class DataQualityValidator:
+    """Validador de calidad de datos recopilados"""
+    
+    @staticmethod
+    def validate_collected_data(collected_data: Dict) -> Dict[str, Any]:
+        """
+        Validar calidad de los datos recopilados.
+        
+        Args:
+            collected_data: Datos recopilados
+            
+        Returns:
+            Reporte de validación
+        """
+        
+        validation_report = {
+            "is_valid": True,
+            "issues": [],
+            "recommendations": [],
+            "confidence_score": 1.0
+        }
+        
+        # Validar nombre
+        name = collected_data.get("name", "")
+        if not DataQualityValidator._is_valid_name(name):
+            validation_report["issues"].append("Nombre no parece válido")
+            validation_report["confidence_score"] -= 0.2
+        
+        # Validar email
+        email = collected_data.get("email", "")
+        if email and not DataQualityValidator._is_valid_email(email):
+            validation_report["issues"].append("Formato de email cuestionable")
+            validation_report["confidence_score"] -= 0.1
+        
+        # Validar tienda
+        store = collected_data.get("store_name", "")
+        if not DataQualityValidator._is_valid_store(store):
+            validation_report["issues"].append("Nombre de tienda poco específico")
+            validation_report["recommendations"].append("Solicitar ubicación más específica")
+            validation_report["confidence_score"] -= 0.1
+        
+        # Validar sección
+        section = collected_data.get("section", "")
+        if not DataQualityValidator._is_valid_section(section):
+            validation_report["issues"].append("Sección no reconocida")
+            validation_report["recommendations"].append("Clarificar sección específica")
+            validation_report["confidence_score"] -= 0.1
+        
+        # Determinar validez general
+        validation_report["is_valid"] = validation_report["confidence_score"] >= 0.7
+        
+        return validation_report
+    
+    @staticmethod
+    def _is_valid_name(name: str) -> bool:
+        """Validar que el nombre sea realista"""
+        if not name or len(name) < 3:
+            return False
+        
+        # Debe tener al menos nombre y apellido
+        parts = name.strip().split()
+        return len(parts) >= 2 and all(part.isalpha() or part.replace('-', '').isalpha() for part in parts)
+    
+    @staticmethod
+    def _is_valid_email(email: str) -> bool:
+        """Validar formato básico de email"""
+        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        return bool(re.match(pattern, email))
+    
+    @staticmethod
+    def _is_valid_store(store: str) -> bool:
+        """Validar que el nombre de tienda sea específico"""
+        if not store or len(store) < 5:
+            return False
+        
+        # Debe contener "eroski" y alguna ubicación
+        store_lower = store.lower()
+        return "eroski" in store_lower and any(
+            keyword in store_lower for keyword in [
+                "madrid", "barcelona", "bilbao", "sevilla", "valencia", 
+                "centro", "norte", "sur", "este", "oeste", "mall", "cc"
+            ]
+        )
+    
+    @staticmethod
+    def _is_valid_section(section: str) -> bool:
+        """Validar que la sección sea reconocida"""
+        if not section:
+            return False
+        
+        valid_sections = [
+            "carnicería", "pescadería", "panadería", "frutería",
+            "caja", "cajas", "tpv", "cobro",
+            "almacén", "recepción", "stock",
+            "oficina", "administración", "gerencia",
+            "sala", "descanso", "vestuario",
+            "limpieza", "mantenimiento", "seguridad"
+        ]
+        
+        section_lower = section.lower()
+        return any(valid in section_lower for valid in valid_sections)
+
+
+# =============================================================================
+# 7. EJEMPLO DE USO E INTEGRACIÓN COMPLETA
+# =============================================================================
+
+# En workflows/eroski_main_workflow.py:
+
+"""
+def _add_nodes(self, graph):
+    try:
+        # Importar nodo LLM-driven
+        from nodes.authenticate_llm_driven import LLMDrivenAuthenticateNode
+        
+        # Crear instancia del nodo
+        auth_node = LLMDrivenAuthenticateNode()
+        
+        # Añadir al grafo
+        graph.add_node("authenticate", auth_node.execute)
+        
+        # Configurar router
+        graph.add_conditional_edges(
+            "authenticate",
+            route_authenticate_llm_driven,  # Usar router mejorado
+            {
+                "continue": "classify",
+                "need_input": END,
+                "escalate": "escalate",
+                "cancelled": END
+            }
+        )
+        
+        self.logger.info("✅ Nodo LLM-driven integrado correctamente")
+        
+    except Exception as e:
+        self.logger.error(f"❌ Error integrando nodo LLM: {e}")
+        raise
+"""
+
+# =============================================================================
+# 8. CONFIGURACIÓN DE LOGGING ESPECIALIZADO
+# =============================================================================
+
+import logging
+
+def setup_llm_driven_logging():
+    """Configurar logging especializado para el nodo LLM-driven"""
+    
+    # Logger específico para conversaciones LLM
+    llm_logger = logging.getLogger("LLMDrivenAuth")
+    llm_logger.setLevel(logging.INFO)
+    
+    # Formato especializado
+    formatter = logging.Formatter(
+        '%(asctime)s | LLM-AUTH | %(levelname)s | %(message)s'
     )
-
-
-def should_return_from_interruption(state: EroskiState) -> bool:
-    """
-    Determina si se debe regresar de una interrupción.
     
-    Args:
-        state: Estado actual del grafo
+    # Handler para archivo específico
+    handler = logging.FileHandler('logs/llm_authentication.log')
+    handler.setFormatter(formatter)
+    llm_logger.addHandler(handler)
+    
+    return llm_logger
+
+# =============================================================================
+# 9. TESTS UNITARIOS PARA EL NODO LLM-DRIVEN
+# =============================================================================
+
+"""
+# En tests/test_llm_authenticate_node.py
+
+import pytest
+from nodes.authenticate_llm_driven import LLMDrivenAuthenticateNode, ConversationDecision
+
+@pytest.mark.asyncio
+async def test_complete_data_in_one_message():
+    '''Test: Usuario da toda la información en un mensaje'''
+    
+    node = LLMDrivenAuthenticateNode()
+    
+    state = {
+        "messages": [
+            HumanMessage(content="Hola, soy Juan Pérez, mi email es juan@eroski.es, trabajo en Eroski Madrid Centro en carnicería")
+        ],
+        "auth_data_collected": {}
+    }
+    
+    # Mock LLM response
+    mock_decision = ConversationDecision(
+        is_complete=True,
+        extracted_data={
+            "name": "Juan Pérez",
+            "email": "juan@eroski.es",
+            "store_name": "Eroski Madrid Centro",
+            "section": "carnicería"
+        },
+        next_action="complete",
+        message_to_user="¡Perfecto Juan! Ya tengo toda tu información..."
+    )
+    
+    with patch.object(node, '_get_llm_decision', return_value=mock_decision):
+        result = await node.execute(state)
+    
+    # Verificar que se completa en un intercambio
+    assert result.update["authentication_stage"] == "completed"
+    assert result.update["datos_usuario_completos"] is True
+
+@pytest.mark.asyncio
+async def test_database_search_integration():
+    '''Test: Integración con búsqueda en base de datos'''
+    
+    node = LLMDrivenAuthenticateNode()
+    
+    # Simular usuario encontrado en BD
+    mock_employee = {
+        "name": "Juan Pérez",
+        "email": "juan@eroski.es",
+        "store_name": "Eroski Madrid Centro",
+        "id": 123
+    }
+    
+    with patch.object(node, '_search_employee_database', return_value={"found": True, "employee": mock_employee}):
+        decision = ConversationDecision(
+            should_search_database=True,
+            extracted_data={"email": "juan@eroski.es"},
+            next_action="search_db"
+        )
         
-    Returns:
-        bool: True si se debe regresar, False en caso contrario
-    """
-    trip = state.get("interruption_trip")
-    return trip is not None and is_return_trip(trip)
+        result = await node._execute_llm_decision({}, decision)
+    
+    # Verificar integración con BD
+    assert result.update["authenticated"] is True
+    assert result.update["found_in_database"] is True
+"""
 
+# =============================================================================
+# RESUMEN DE BENEFICIOS DE LA NUEVA IMPLEMENTACIÓN
+# =============================================================================
 
-# ==========================================
-# CONSTANTES PARA TIPOS DE SENTIDO
-# ==========================================
+"""
+🎯 BENEFICIOS CLAVE:
 
-class InterruptionDirection:
-    """Constantes para los tipos de dirección de interrupciones."""
-    OUTBOUND = "ida"      # Ir hacia la interrupción
-    RETURN = "vuelta"     # Regresar de la interrupción
-    CIRCULAR = "circular" # Interrupción que regresa al mismo nodo (casos especiales)
+1. **EFICIENCIA MÁXIMA**:
+   - 1 intercambio vs 4+ del sistema anterior
+   - Recopilación inteligente de múltiples datos por mensaje
+   - Adaptación contextual automática
+
+2. **SIMPLICIDAD DE CÓDIGO**:
+   - ~300 líneas vs 800+ del anterior
+   - Lógica centralizada en el LLM
+   - Mantenimiento simplificado
+
+3. **EXPERIENCIA SUPERIOR**:
+   - Conversación natural vs interrogatorio
+   - Mensajes personalizados y contextuales
+   - Detección inteligente de intenciones
+
+4. **ROBUSTEZ**:
+   - Parser múltiple con fallbacks
+   - Validación de calidad de datos
+   - Métricas de rendimiento
+
+5. **ESCALABILIDAD**:
+   - Fácil añadir nuevos campos
+   - Modificaciones solo en prompt
+   - Integración simple con otros sistemas
+
+6. **MONITOREO**:
+   - Métricas detalladas de eficiencia
+   - Logging especializado
+   - Validación de calidad automática
+"""

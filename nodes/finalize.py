@@ -209,7 +209,7 @@ class FinalizeConversationNode(BaseNode):
             "final_metrics": metrics,
             "implicit_feedback": feedback,
             "conversation_closed": True,
-            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "messages": [AIMessage(content=message)],
             "current_node": "finalize",
             "last_activity": datetime.now(),
             "awaiting_user_input": False
@@ -366,7 +366,7 @@ Ha ocurrido un error técnico durante la finalización de la conversación.
             "flow_completed": True,
             "finalization_type": "error",
             "error_in_finalization": True,
-            "messages": state.get("messages", []) + [AIMessage(content=error_message)],
+            "messages": [AIMessage(content=error_message)],
             "current_node": "finalize",
             "last_activity": datetime.now(),
             "awaiting_user_input": False

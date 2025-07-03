@@ -275,7 +275,7 @@ class SearchSolutionNode(BaseNode):
             "solution_score": solution["score"],
             "resolution_steps": solution_data.get("steps", []),
             "estimated_resolution_time": solution_data.get("estimated_time", "5-10 minutos"),
-            "messages": state.get("messages", []) + [AIMessage(content=solution_message)],
+            "messages": [AIMessage(content=solution_message)],
             "current_node": "search_solution",
             "last_activity": datetime.now(),
             "awaiting_user_input": False
@@ -333,7 +333,7 @@ Aunque no tengo una solución automática para tu problema específico, puedo ay
             "solution_found": False,
             "solution_type": None,
             "escalation_reason": "No se encontró solución automática aplicable",
-            "messages": state.get("messages", []) + [AIMessage(content=no_solution_message)],
+            "messages": [AIMessage(content=no_solution_message)],
             "current_node": "search_solution",
             "last_activity": datetime.now(),
             "awaiting_user_input": False
@@ -345,7 +345,7 @@ Aunque no tengo una solución automática para tu problema específico, puedo ay
             "escalation_needed": True,
             "escalation_reason": f"Error técnico buscando soluciones: {error_message}",
             "escalation_level": "technical",
-            "messages": state.get("messages", []) + [
+            "messages": [
                 AIMessage(content="Ha ocurrido un error técnico. Te derivo a soporte técnico.")
             ],
             "current_node": "search_solution",
