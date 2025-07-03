@@ -1,5 +1,5 @@
 # =====================================================
-# nodes/eroski/search_solution.py - Nodo de Búsqueda de Soluciones
+# nodes/search_solution.py - Nodo de Búsqueda de Soluciones
 # =====================================================
 """
 Nodo para buscar soluciones automáticas a incidencias técnicas.

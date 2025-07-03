@@ -1,5 +1,5 @@
 # =====================================================
-# nodes/eroski/finalize.py - Nodo de Finalización de Conversación
+# nodes/finalize.py - Nodo de Finalización de Conversación
 # =====================================================
 """
 Nodo para finalizar conversaciones y cerrar tickets.

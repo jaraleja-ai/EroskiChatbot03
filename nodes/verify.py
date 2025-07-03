@@ -1,5 +1,5 @@
 # =====================================================
-# nodes/eroski/verify.py - Nodo de Verificación de Resolución
+# nodes/verify.py - Nodo de Verificación de Resolución
 # =====================================================
 """
 Nodo para verificar si la solución proporcionada ha resuelto el problema.

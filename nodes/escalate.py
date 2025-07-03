@@ -1,5 +1,5 @@
 # =====================================================
-# nodes/eroski/escalate.py - Nodo de Escalación a Supervisor
+# nodes/escalate.py - Nodo de Escalación a Supervisor
 # =====================================================
 """
 Nodo para escalación a supervisor o soporte técnico.
