@@ -29,20 +29,20 @@ from pydantic import BaseModel, Field
 
 class UserResponseAnalysis(BaseModel):
     """Análisis de la respuesta del usuario por LLM"""
-    wants_to_cancel: bool = Field(description="Si el usuario quiere cancelar el proceso")
-    has_email: bool = Field(description="Si se encontró un email corporativo")
-    has_name: bool = Field(description="Si se encontró nombre completo")
-    has_store_code: bool = Field(description="Si se encontró código de tienda")
-    has_store_name: bool = Field(description="Si se encontró nombre de tienda")
-    has_section: bool = Field(description="Si se encontró nombre de sección")
-    confirmed_same_store: Optional[bool] = Field(description="Si confirmó que la incidencia es en su tienda registrada")
-    email: Optional[str] = Field(description="Email extraído")
-    name: Optional[str] = Field(description="Nombre completo extraído")
-    store_code: Optional[str] = Field(description="Código de tienda extraído")
-    store_name: Optional[str] = Field(description="Nombre de tienda extraído")
-    section: Optional[str] = Field(description="Sección extraída")
-    missing_fields: List[str] = Field(description="Campos que faltan")
-    next_message: str = Field(description="Mensaje natural para continuar")
+    wants_to_cancel: bool = Field(default=False, description="Si el usuario quiere cancelar el proceso")
+    has_email: bool = Field(default=False, description="Si se encontró un email corporativo")
+    has_name: bool = Field(default=False, description="Si se encontró nombre completo")
+    has_store_code: bool = Field(default=False, description="Si se encontró código de tienda")
+    has_store_name: bool = Field(default=False, description="Si se encontró nombre de tienda")
+    has_section: bool = Field(default=False, description="Si se encontró nombre de sección")
+    confirmed_same_store: Optional[bool] = Field(default=None, description="Si confirmó que la incidencia es en su tienda registrada")
+    email: Optional[str] = Field(default=None, description="Email extraído")
+    name: Optional[str] = Field(default=None, description="Nombre completo extraído")
+    store_code: Optional[str] = Field(default=None, description="Código de tienda extraído")
+    store_name: Optional[str] = Field(default=None, description="Nombre de tienda extraído")
+    section: Optional[str] = Field(default=None, description="Sección extraída")
+    missing_fields: List[str] = Field(default_factory=list, description="Campos que faltan")
+    next_message: str = Field(default="Por favor, proporciona más información.", description="Mensaje natural para continuar")
 
 class AuthenticateEmployeeNodeComplete(BaseNode):
     """

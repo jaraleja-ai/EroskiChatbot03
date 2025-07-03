@@ -20,7 +20,9 @@ from models.eroski_state import EroskiState, ConsultaType
 from .base_workflow import BaseWorkflow
 
 # Importar nodos usando el sistema de fallback
-from nodes import get_best_authenticate_node, get_best_classify_node
+from nodes.authenticate_enhanced import authenticate_employee_node
+from nodes.classify_enhanced import classify_query_node
+
 
 class EroskiFinalWorkflow(BaseWorkflow):
     """
@@ -61,14 +63,11 @@ class EroskiFinalWorkflow(BaseWorkflow):
         # ========== AGREGAR NODOS CON FALLBACK AUTOMÁTICO ==========
         
         # Obtener mejores nodos disponibles
-        authenticate_node = get_best_authenticate_node()
-        classify_node = get_best_classify_node()
-        
         # Nodo de autenticación (mejorado o básico)
-        graph.add_node("authenticate", authenticate_node)
+        graph.add_node("authenticate", authenticate_employee_node)
         
         # Nodo de clasificación (mejorado o básico)
-        graph.add_node("classify", classify_node)
+        graph.add_node("classify", classify_query_node)
         
         # Nodos adicionales (pueden ser mock por ahora)
         graph.add_node("collect_incident", self._mock_collect_incident)
