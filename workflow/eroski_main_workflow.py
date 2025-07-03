@@ -84,13 +84,13 @@ class EroskiFinalWorkflow(BaseWorkflow):
         # ========== IMPORTAR Y AGREGAR NODOS ==========
         try:
             from nodes.authenticate import authenticate_employee_node
-            from nodes.eroski.classify import classify_query_node
-            from nodes.eroski.collect_incident import collect_incident_details_node
-            from nodes.eroski.search_solution import search_solution_node
-            from nodes.eroski.search_knowledge import search_knowledge_node
-            from nodes.eroski.escalate import escalate_supervisor_node
-            from nodes.eroski.verify import verify_resolution_node
-            from nodes.eroski.finalize import finalize_conversation_node
+            from nodes.classify import classify_query_node
+            from nodes.collect_incident import collect_incident_details_node
+            from nodes.search_solution import search_solution_node
+            from nodes.search_knowledge import search_knowledge_node
+            from nodes.escalate import escalate_supervisor_node
+            from nodes.verify import verify_resolution_node
+            from nodes.finalize import finalize_conversation_node
             
             graph.add_node("authenticate", authenticate_employee_node)
             graph.add_node("classify", classify_query_node)
