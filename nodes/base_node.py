@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 import asyncio
 
+
 from config.settings import get_settings
 
 class ActorDecision:
@@ -134,27 +135,23 @@ class BaseNode(ABC):
         request_message: str,
         context: Dict[str, Any] = None
     ) -> Command:
-        """
-        🎯 SEÑAL DE ACTOR: "Necesito información del usuario"
+        """🎯 VERSIÓN SIMPLE: Push al stack"""
         
-        El actor solicita específicamente datos del usuario.
-        ✅ CORREGIDO: No usa .get() en Command
-        """
-        self._record_decision(ActorDecision.NEED_INPUT, "recopilar_input_usuario")
+        # Push al stack
+        stack = state.get("_routing_stack", [])
+        stack.append(self.name)
         
-        update_data = {
+        return Command(update={
             **state,
-            "_actor_decision": ActorDecision.NEED_INPUT,
-            "_next_actor": "recopilar_input_usuario",  # ✅ AÑADIDO: Próximo actor
+            "_actor_decision": "need_input",
+            "_next_actor": "recopilar_input_usuario",
             "_request_message": request_message,
-            "_input_context": context or {},
-            "awaiting_input": True,  # ✅ AÑADIDO: Flag de interrupción
-            "requires_user_input": True,  # ✅ AÑADIDO: Compatibilidad
-            "messages": [AIMessage(content=request_message)]
-        }
-        
-        self.logger.info(f"📥 {self.name} SOLICITA INPUT: {request_message[:50]}...")
-        return Command(update=update_data)
+            "awaiting_input": True,
+            "requires_user_input": True,
+            "messages": [AIMessage(content=request_message)],
+            "_routing_stack": stack                    # ✅ Solo esto
+        })
+
 
     def signal_escalation(
         self, 
@@ -205,13 +202,16 @@ class BaseNode(ABC):
             self._actor_state["decision_history"] = self._actor_state["decision_history"][-10:]
 
     def get_last_user_message(self, state: Dict[str, Any]) -> str:
-        """Obtener el último mensaje del usuario"""
+        """✅ CORREGIDO: Obtener el último mensaje del usuario"""
         messages = state.get("messages", [])
         
         for message in reversed(messages):
-            if hasattr(message, 'type') and message.type == "human":
+            # Método 1: Verificar por tipo de clase (más confiable)
+            if isinstance(message, HumanMessage):
                 return message.content
-            elif isinstance(message, HumanMessage):
+            
+            # Método 2: Verificar por atributo type (backup)
+            if hasattr(message, 'type') and message.type == "Human":  # ✅ "Human" con mayúscula
                 return message.content
         
         return ""
@@ -384,26 +384,3 @@ class BaseNode(ABC):
         
         return Command(update=diff)
 
-        """Manejo centralizado de errores"""
-        error_msg = f"Error en {self.name}: {str(error)}"
-        
-        # Si hay muchos errores, escalar
-        if self._actor_state["error_count"] >= 3:
-            new_state = self.signal_escalation(
-                state,
-                f"múltiples errores en {self.name}",
-                attempts=self._actor_state["error_count"]
-            )
-            update = self.get_state_diff(state, new_state)
-            return Command(update=update)
-        
-        # Intentar recuperación
-        return Command(update={
-            "intentos":0,
-            "error_info": {
-                "actor": self.name,
-                "error": str(error),
-                "timestamp": datetime.now().isoformat()
-            },
-            "messages": [AIMessage(content="Disculpa, tuve un problema técnico. ¿Podrías intentar de nuevo?")]
-        })

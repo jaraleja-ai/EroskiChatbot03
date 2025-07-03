@@ -19,7 +19,7 @@ class EscalarSupervisorNode(BaseNode):
     """
     
     def __init__(self):
-        super().__init__("EscalarSupervisor", timeout_seconds=30)
+        super().__init__("escalar_supervisor", timeout_seconds=30)
     
     def get_required_fields(self) -> List[str]:
         return ["messages", "escalar_a_supervisor"]

@@ -1,5 +1,7 @@
-from typing import TypedDict, List, Optional, Any, Dict
+from typing import TypedDict, List, Optional, Any, Dict, Tuple
 from langchain_core.messages import BaseMessage
+
+InterruptionTrip = Tuple[str, str, str]  # (origen, destino, sentido)
 
 class GraphState(TypedDict, total=False):
     """
@@ -24,7 +26,8 @@ class GraphState(TypedDict, total=False):
     awaiting_input: bool                    # True cuando esperamos input del usuario
     current_step: Optional[str]             # Paso actual del flujo
     next_action: Optional[str]              # Próxima acción a ejecutar
-    
+    interruption_trip: Optional[InterruptionTrip]  # 🆕 Tupla de interrupción (origen, destino, sentido)
+
     # 💬 MENSAJES Y COMUNICACIÓN
     messages: List[BaseMessage]             # Historia de mensajes
     
@@ -65,3 +68,6 @@ class GraphState(TypedDict, total=False):
     timestamp_inicio: Optional[str]         # Timestamp de inicio
     error_info: Optional[Dict[str, Any]]    # Información de errores
     flow_history: List[str]                 # Historia del flujo ejecutado
+    
+    # 🎯 ROUTING SIMPLE
+    _routing_stack: List[str]   

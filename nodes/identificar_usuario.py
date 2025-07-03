@@ -8,7 +8,7 @@ from datetime import datetime
 
 from .base_node import BaseNode, ActorDecision
 from utils.extractors.user_extractor import extraer_datos_usuario
-
+from utils.interruption_trip import create_interruption_trip
 class IdentificarUsuarioNode(BaseNode):
     """
     🎭 ACTOR HÍBRIDO: Identificar y validar datos del usuario
@@ -27,7 +27,7 @@ class IdentificarUsuarioNode(BaseNode):
     """
     
     def __init__(self):
-        super().__init__("IdentificarUsuario", timeout_seconds=45)
+        super().__init__("identificar_usuario", timeout_seconds=45)
     
     def get_required_fields(self) -> List[str]:
         """✅ IMPLEMENTACIÓN REQUERIDA"""
@@ -212,15 +212,73 @@ class IdentificarUsuarioNode(BaseNode):
             return None
     
     def get_last_user_message(self, state: Dict[str, Any]) -> str:
-        """Obtener el último mensaje del usuario"""
+        """✅ CORREGIDO: Obtener el último mensaje del usuario"""
         messages = state.get("messages", [])
         
         for message in reversed(messages):
+            # Método 1: Verificar por tipo de clase (más confiable)
             if isinstance(message, HumanMessage):
+                return message.content
+            
+            # Método 2: Verificar por atributo type (backup)
+            if hasattr(message, 'type') and message.type == "Human":  # ✅ "Human" con mayúscula
                 return message.content
         
         return ""
 
+    def signal_need_input(
+        self, 
+        state: Dict[str, Any], 
+        request_message: str, 
+        context: Dict[str, Any] = None
+    ) -> Command:
+        """
+        🎭 Señalar que se necesita input del usuario CORREGIDO.
+        
+        CAMBIOS PRINCIPALES:
+        1. ✅ Señalización clara sin bucles
+        2. ✅ Contexto mejorado para continuación
+        3. ✅ Logging detallado para debugging
+        """
+
+
+        
+        # Ahora self.name = "identificar_usuario" ✅
+        
+        # Actualizar el estado
+        state["messages"] = state.get("messages", []) + [request_message]
+
+        
+    
+        self.logger.info("📥 IdentificarUsuario solicita input del usuario → router → recopilar_input_usuario")
+        self.logger.info(f"📥 IdentificarUsuario SOLICITA INPUT: {request_message[:50]}...")
+        # Crear interrupción de ida
+       
+        trip = create_interruption_trip(self.name, "recopilar_input_usuario", "ida")
+        state["interruption_trip"] = trip
+
+        # Preparar contexto por defecto si no se proporciona
+        if context is None:
+            context = {
+                "waiting_for": ["nombre", "email"],
+                "reason": "missing_data",
+                "requesting_node": "IdentificarUsuario",
+                "resume_node": "identificar_usuario",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # 🎯 COMANDO CORREGIDO CON SEÑALIZACIÓN CLARA
+        return Command(update={
+            **state,
+            # 🎭 SEÑALES CLARAS PARA EL ROUTER
+            "_actor_decision": "need_input",
+            "_next_actor": "recopilar_input_usuario",
+            "_request_message": request_message,
+            "awaiting_input": True,
+            "requires_user_input": True,
+            "messages": [AIMessage(content=request_message)],
+            
+        })
 
 # =====================================================
 # WRAPPER PARA LANGGRAPH

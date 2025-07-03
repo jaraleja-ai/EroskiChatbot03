@@ -82,24 +82,54 @@ class ChatbotSession:
         self.logger.info(f"🆕 Nueva sesión iniciada: {session_id}")
     
 
-    # ✅ NUEVO MÉTODO - Preservar datos de usuario
+
     def _preserve_user_data_in_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Preservar datos de usuario en el estado entre ejecuciones.
+        Preservar datos de usuario en el estado entre ejecuciones MEJORADO.
         
-        Args:
-            state: Estado actual
-            
-        Returns:
-            Estado con datos de usuario preservados
+        CAMBIOS PRINCIPALES:
+        1. ✅ Preserva todos los datos críticos del usuario
+        2. ✅ Mantiene contexto de conversación
+        3. ✅ Evita pérdida de información
         """
-        # Preservar datos existentes
-        for key, value in self.user_data.items():
-            if value is not None:
-                state[key] = value
-                self.logger.debug(f"🔄 Preservando {key}: {value}")
         
-        return state
+        # Datos a preservar siempre
+        preserved_data = {
+            # Datos básicos del usuario
+            "nombre": self.user_data.get("nombre") or state.get("nombre"),
+            "email": self.user_data.get("email") or state.get("email"),
+            "numero_empleado": self.user_data.get("numero_empleado") or state.get("numero_empleado"),
+            
+            # Estados de confirmación
+            "nombre_confirmado": self.user_data.get("nombre_confirmado") or state.get("nombre_confirmado", False),
+            "email_confirmado": self.user_data.get("email_confirmado") or state.get("email_confirmado", False),
+            "datos_usuario_completos": self.user_data.get("datos_usuario_completos") or state.get("datos_usuario_completos", False),
+            
+            # Datos de incidencia
+            "tipo_incidencia": state.get("tipo_incidencia"),
+            "descripcion_incidencia": state.get("descripcion_incidencia"),
+            "prioridad_incidencia": state.get("prioridad_incidencia"),
+            "categoria_incidencia": state.get("categoria_incidencia"),
+            
+            # Metadatos de sesión
+            "sesion_id": self.session_id,
+            "timestamp_inicio": state.get("timestamp_inicio"),
+            "intentos": state.get("intentos", 0),
+            "intentos_incidencia": state.get("intentos_incidencia", 0)
+        }
+        
+        # Actualizar estado con datos preservados
+        updated_state = {**state, **preserved_data}
+        
+        # Actualizar cache local
+        self.user_data.update({
+            k: v for k, v in preserved_data.items() 
+            if k in self.user_data and v is not None
+        })
+        
+        self.logger.debug("✅ Datos de usuario preservados en estado")
+        return updated_state
+
 
     # ✅ NUEVO MÉTODO - Extraer y guardar datos de usuario
     def _extract_and_save_user_data(self, state: Dict[str, Any]):
@@ -230,10 +260,16 @@ class ChatbotSession:
         except Exception as e:
             self.logger.error(f"❌ Error iniciando nuevo flujo: {e}")
             raise
-    
-    # ✅ MODIFICAR MÉTODO EXISTENTE
+
     async def _continue_interrupted_flow(self) -> List[str]:
-        """Continuar un flujo que fue interrumpido"""
+        """
+        Continuar un flujo que fue interrumpido CORREGIDO.
+        
+        CAMBIOS PRINCIPALES:
+        1. ✅ Mejor preservación de datos de usuario
+        2. ✅ Limpieza automática de flags
+        3. ✅ Manejo robusto de errores
+        """
         try:
             self.logger.info("🔄 Continuando flujo interrumpido...")
             
@@ -246,19 +282,36 @@ class ChatbotSession:
             
             # ✅ CONTINUAR CON CONFIGURACIÓN PERSISTENTE (SIN ESTADO INICIAL)
             result = await self.current_graph.ainvoke(
-                None,  # ✅ NO pasar estado, usar el persistido
-                config=self.config
+                None,  # ✅ NO pasar estado, usar el persistido en checkpoint
+                config=self.config  # Incluye thread_id para encontrar checkpoint
             )
             
             # ✅ EXTRAER Y GUARDAR DATOS
             self._extract_and_save_user_data(result)
+            
+            # Verificar si necesita otra interrupción
+            if self._is_interrupted_result(result):
+                self.logger.info("⏸️ Flujo interrumpido nuevamente - esperando más input")
+                self.is_interrupted = True
+                self.pending_user_input = True
+                return await self._extract_messages_before_interruption(result.get("messages", []))
+            
+            # Flujo normal - limpiar estado de interrupción
+            self.is_interrupted = False
+            self.pending_user_input = False
             
             # Procesar resultado
             return await self._process_graph_result(result)
             
         except Exception as e:
             self.logger.error(f"❌ Error continuando flujo interrumpido: {e}")
+            # Reset en caso de error
+            self.is_interrupted = False
+            self.pending_user_input = False
             raise
+
+
+        
     # ✅ MODIFICAR MÉTODO EXISTENTE
     async def _execute_graph_invoke(self) -> List[str]:
         """

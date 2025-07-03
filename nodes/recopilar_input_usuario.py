@@ -4,6 +4,8 @@
 from typing import Dict, Any, Optional, List
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
+from datetime import datetime
+from utils.interruption_trip import get_trip_origin
 
 from .base_node import BaseNode
 
@@ -19,7 +21,7 @@ class RecopilarInputUsuarioNode(BaseNode):
     """
     
     def __init__(self):
-        super().__init__("RecopilarInputUsuario", timeout_seconds=30)
+        super().__init__("recopilar_input_usuario", timeout_seconds=30)
     
     def get_required_fields(self) -> List[str]:
         """✅ IMPLEMENTACIÓN REQUERIDA"""
@@ -31,58 +33,68 @@ class RecopilarInputUsuarioNode(BaseNode):
             "Maneja la recopilación de input del usuario estableciendo flags "
             "de interrupción y generando mensajes apropiados según el contexto"
         )
-    
+
+# 8. EN recopilar_input_usuario.py - IMPLEMENTAR LÓGICA DE STACK:
+
     async def execute(self, state: Dict[str, Any]) -> Command:
-        """
-        🎭 Ejecutar lógica principal de recopilación de input.
+        #state['interruption_trip'] = None
+        return_to = get_trip_origin(state["interruption_trip"])
+        self.logger.info(f"✅ Origen interruption Trip → {return_to}")
+        print("🌄"*50)
+        print(f"✅ Origen interruption Trip → {return_to}")
         
-        Este nodo maneja el proceso de solicitar input del usuario y
-        configurar las interrupciones apropiadas.
-        """
+        # Obtener el último mensaje del usuario y el último mensaje procesado
         try:
-            # Obtener contexto de la solicitud
             request_message = state.get("_request_message", "")
-            input_context = state.get("_input_context", {})
+            last_processed = state.get("_last_processed_message", "")
             
-            self.logger.info("🔄 === RECOPILANDO INPUT DEL USUARIO ===")
-            self.logger.info(f"📨 Mensaje a mostrar: {request_message[:100]}...")
-            self.logger.info(f"📋 Contexto: {input_context}")
+            self.logger.info("🔄 === RECOPILAR INPUT SIMPLIFICADO ===")
             
-            # Si no hay mensaje específico, generar uno genérico
-            if not request_message:
-                request_message = "Necesito más información para continuar. ¿Puedes ayudarme?"
-                self.logger.warning("⚠️ No hay mensaje específico, usando genérico")
+            current_message = self.get_last_user_message(state)
+            self.logger.info(f"📥 Mensaje usuario: '{current_message[:50] if current_message else 'None'}...'")
             
-            # Configurar estado para interrumpir el flujo
-            update_data = {
-                **state,
-                "messages": [AIMessage(content=request_message)],
-                "awaiting_input": True,
-                "requires_user_input": True,
-                "_waiting_for_input": True,
-                "_input_context": input_context,
-                "_current_request": request_message
-            }
+            if current_message and current_message != last_processed and current_message.strip():
+                # ✅ HAY INPUT → Pop del stack y volver
+                self.logger.info(f"✅ INPUT RECIBIDO → Volviendo a {return_to}")
+                
+                return Command(update={
+                    **state,
+                    "awaiting_input": False,
+                    "requires_user_input": False,
+                    "_actor_decision": "input_received",
+                    "_next_actor": return_to,                      # ✅ Ahora coincide con nodo del grafo
+                    "_last_processed_message": current_message,
+                    "intentos": state.get("intentos", 0) + 1
+                })
             
-            self.logger.info("⏸️ Configurando interrupción para esperar input del usuario")
-            self.logger.info("✅ RecopilarInputUsuario completado - Esperando input")
-            
-            return Command(update=update_data)
-            
+            else:
+                # ❌ NO HAY INPUT → Mantener interrupción
+                self.logger.info("⏸️ Esperando input del usuario")
+                
+                return Command(update={
+                    **state,
+                    "messages": [AIMessage(content=request_message or "Necesito más información")],
+                    "awaiting_input": True,
+                    "requires_user_input": True,
+                })
+                
         except Exception as e:
-            self.logger.error(f"❌ Error en recopilar_input_usuario: {e}")
+            self.logger.error(f"❌ Error: {e}")
             
-            # En caso de error, mostrar mensaje genérico
+            # En error, POP de emergencia si hay stack
+            emergency_stack = state.get("_routing_stack", [])
+            fallback_destination = emergency_stack.pop() if emergency_stack else "identificar_usuario"
+            
             return Command(update={
                 **state,
-                "messages": [AIMessage(content="Disculpa, necesito que me proporciones más información.")],
-                "awaiting_input": True,
-                "requires_user_input": True,
-                "error_info": {
-                    "node": "RecopilarInputUsuario",
-                    "error": str(e)
-                }
+                "escalar_a_supervisor": True,
+                "razon_escalacion": f"Error en recopilar_input_usuario: {e}",
+                "_actor_decision": "escalate",
+                "_next_actor": "escalar_supervisor",
+                "_routing_stack": emergency_stack
             })
+
+
 
     def create_message_update(
         self, 

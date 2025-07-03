@@ -24,7 +24,7 @@ class ProcesarIncidenciaNode(BaseNode):
     """
     
     def __init__(self):
-        super().__init__("ProcesarIncidencia", timeout_seconds=60)
+        super().__init__("procesar_incidencia", timeout_seconds=60)
         self.incidencia_repository = IncidenciaRepository()
     
     def get_required_fields(self) -> List[str]:

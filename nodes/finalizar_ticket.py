@@ -19,7 +19,7 @@ class FinalizarTicketNode(BaseNode):
     """
     
     def __init__(self):
-        super().__init__("FinalizarTicket", timeout_seconds=30)
+        super().__init__("finalizar_ticket", timeout_seconds=30)
         self.incidencia_repository = IncidenciaRepository()
     
     def get_required_fields(self) -> List[str]:
