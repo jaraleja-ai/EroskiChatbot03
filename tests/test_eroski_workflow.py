@@ -32,7 +32,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from workflows.eroski_main_workflow import EroskiFinalWorkflow, create_eroski_workflow
 from interfaces.eroski_chat_interface import EroskiChatInterface, create_eroski_chat_interface
 from models.eroski_state import EroskiState, create_initial_eroski_state, ConsultaType
-from nodes.eroski.authenticate import AuthenticateEmployeeNode, EroskiEmployeeValidator
+from nodes.eroski.authenticate import AuthenticateEmployeeNodeComplete, EroskiEmployeeValidator
 
 # ========== FIXTURES ==========
 
@@ -86,7 +86,7 @@ class TestAuthenticateNode:
     
     @pytest.fixture
     def auth_node(self):
-        return AuthenticateEmployeeNode()
+        return AuthenticateEmployeeNodeComplete()
     
     @pytest.mark.asyncio
     async def test_first_execution_requests_credentials(self, auth_node, initial_state):

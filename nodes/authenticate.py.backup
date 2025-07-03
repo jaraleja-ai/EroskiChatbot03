@@ -29,7 +29,7 @@ from models.eroski_state import EroskiState
 # CAMBIO: Importar validador de base de datos en lugar del mock
 from utils.eroski_database_auth import EroskiDatabaseEmployeeValidator
 
-class AuthenticateEmployeeNode:
+class AuthenticateEmployeeNodeComplete:
     """
     Nodo optimizado para autenticación de empleados usando PostgreSQL.
     
@@ -449,5 +449,5 @@ async def authenticate_employee_node(state: EroskiState) -> Command:
     Returns:
         Command con la actualización de estado
     """
-    node = AuthenticateEmployeeNode()
+    node = AuthenticateEmployeeNodeComplete()
     return await node.execute(state)
