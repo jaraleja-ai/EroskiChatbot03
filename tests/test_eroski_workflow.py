@@ -242,7 +242,7 @@ class TestEroskiWorkflow:
         # Test routing de autenticación
         authenticated_state = {
             "employee_email": "test@eroski.es",
-            "store_info": "Test Store",
+            "store_name": "Test Store",
             "authenticated": True
         }
         assert workflow.route_authenticate(authenticated_state) == "continue"

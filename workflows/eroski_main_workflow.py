@@ -248,13 +248,13 @@ class EroskiFinalWorkflow(BaseWorkflow):
         """
         self.logger.info(f"🌄JGL Entrada en el router de autenticación")
         self.logger.info(f"🌄JGL employee_email: {state.get("employee_email")}")
-        self.logger.info(f"🌄JGL store_info: {state.get("store_info")}")
+        self.logger.info(f"🌄JGL store_name: {state.get("store_name")}")
         self.logger.info(f"🌄JGL authenticated: {state.get("authenticated")}")
 
         
         # Si ya está autenticado, continuar
         if (state.get("employee_email") and 
-            state.get("store_info") and 
+            state.get("store_name") and 
             state.get("authenticated")):
             self.logger.info(f"✅ Empleado autenticado: {state.get('employee_name')}")
             return "continue"
