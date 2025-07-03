@@ -1,21 +1,14 @@
 # =====================================================
-# workflows/eroski_main_workflow.py - Workflow Principal Optimizado
+# workflows/eroski_main_workflow.py - Workflow Principal con Nodos Mejorados
 # =====================================================
 """
-Workflow principal simplificado para el chatbot de Eroski.
+Workflow principal actualizado para usar los nodos mejorados con LLM.
 
-RESPONSABILIDADES:
-- Construir el grafo principal con ramas a END
-- Definir routing entre nodos
-- Gestionar flujo de conversación
-- Manejo de escalación
-
-PRINCIPIOS DE DISEÑO:
-- Flujo lineal y predecible
-- Decisiones claras en cada punto
-- Escalación rápida cuando sea necesario
-- Estado mínimo pero completo
-- Ramas directas a END para solicitud de información
+CAMBIOS PRINCIPALES:
+- Usa authenticate_enhanced para autenticación completa
+- Usa classify_enhanced para clasificación con LLM
+- Elimina nodos mock
+- Routing actualizado para nuevos estados
 """
 
 from langgraph.graph import StateGraph, START, END
@@ -26,22 +19,12 @@ import logging
 from models.eroski_state import EroskiState, ConsultaType
 from .base_workflow import BaseWorkflow
 
+# Importar nodos usando el sistema de fallback
+from nodes import get_best_authenticate_node, get_best_classify_node
+
 class EroskiFinalWorkflow(BaseWorkflow):
     """
-    Workflow principal optimizado para Eroski con ramas a END.
-    
-    FLUJO SIMPLIFICADO:
-    1. Autenticación del empleado
-    2. Clasificación de la consulta  
-    3. Procesamiento específico según tipo
-    4. Resolución o escalación
-    5. Finalización
-    
-    CARACTERÍSTICAS:
-    - Cada nodo que necesite input del usuario tiene rama a END
-    - Estado persistente entre ejecuciones
-    - Respuestas inmediatas al usuario
-    - Continuación automática en siguiente invoke()
+    Workflow principal actualizado con nodos mejorados.
     """
     
     def __init__(self):
@@ -53,406 +36,342 @@ class EroskiFinalWorkflow(BaseWorkflow):
     
     def get_workflow_description(self) -> str:
         return """
-        Workflow Principal de Eroski - Chatbot de Incidencias Optimizado
+        Workflow Principal de Eroski - Con Nodos Mejorados
         
-        Flujo optimizado para:
-        1. Autenticación rápida de empleados
-        2. Clasificación inteligente de consultas
-        3. Resolución automática cuando sea posible
-        4. Escalación eficiente cuando sea necesario
+        Funcionalidades:
+        1. Autenticación completa con LLM (usuario BD + no BD)
+        2. Clasificación inteligente de incidencias
+        3. Detección de cancelación en cualquier momento
+        4. Recopilación iterativa de información
         
-        Características:
-        - Flujo lineal y predecible
-        - Decisiones claras en cada paso
-        - Manejo robusto de errores
-        - Métricas integradas
-        - Optimizado para casos de uso de Eroski
+        Nodos mejorados:
+        - AuthenticateNodeEnhanced: Recopila toda la información necesaria
+        - ClassifyQueryNodeEnhanced: Análisis LLM de incidencias
         """
         
     def build_graph(self) -> StateGraph:
         """
-        Construir el grafo principal optimizado con ramas a END.
-        
-        Returns:
-            Grafo compilado con checkpointer y persistencia
+        Construir el grafo con nodos mejorados.
         """
-        self.logger.info("🔨 Construyendo grafo principal de Eroski...")
+        self.logger.info("🏗️ Construyendo grafo con nodos mejorados")
         
-        # Crear grafo con el estado
+        # Crear grafo
         graph = StateGraph(EroskiState)
         
-        # ========== IMPORTAR Y AGREGAR NODOS ==========
-        try:
-            from nodes.authenticate import authenticate_employee_node
-            from nodes.classify import classify_query_node
-            from nodes.collect_incident import collect_incident_details_node
-            from nodes.search_solution import search_solution_node
-            from nodes.search_knowledge import search_knowledge_node
-            from nodes.escalate import escalate_supervisor_node
-            from nodes.verify import verify_resolution_node
-            from nodes.finalize import finalize_conversation_node
-            
-            graph.add_node("authenticate", authenticate_employee_node)
-            graph.add_node("classify", classify_query_node)
-            graph.add_node("collect_incident", collect_incident_details_node)
-            graph.add_node("search_solution", search_solution_node)
-            graph.add_node("search_knowledge", search_knowledge_node)
-            graph.add_node("escalate", escalate_supervisor_node)
-            graph.add_node("verify", verify_resolution_node)
-            graph.add_node("finalize", finalize_conversation_node)
-            
-            self.logger.info("✅ Todos los nodos importados y agregados correctamente")
-            
-        except ImportError as e:
-            self.logger.error(f"❌ Error importando nodos: {e}")
-            # Fallback: usar nodos mock para desarrollo
-            self._add_mock_nodes(graph)
+        # ========== AGREGAR NODOS CON FALLBACK AUTOMÁTICO ==========
         
-        # ========== DEFINIR FLUJO CON RAMAS A END ==========
+        # Obtener mejores nodos disponibles
+        authenticate_node = get_best_authenticate_node()
+        classify_node = get_best_classify_node()
+        
+        # Nodo de autenticación (mejorado o básico)
+        graph.add_node("authenticate", authenticate_node)
+        
+        # Nodo de clasificación (mejorado o básico)
+        graph.add_node("classify", classify_node)
+        
+        # Nodos adicionales (pueden ser mock por ahora)
+        graph.add_node("collect_incident", self._mock_collect_incident)
+        graph.add_node("search_knowledge", self._mock_search_knowledge)
+        graph.add_node("escalate", self._mock_escalate)
+        graph.add_node("finalize", self._mock_finalize)
+        
+        # ========== DEFINIR FLUJO CON ROUTING MEJORADO ==========
         
         # Punto de entrada
         graph.add_edge(START, "authenticate")
         
-        # AUTHENTICATE: Puede solicitar credenciales y terminar, o continuar
+        # AUTHENTICATE: Routing mejorado
         graph.add_conditional_edges(
             "authenticate",
-            self.route_authenticate,
+            self.route_authenticate_enhanced,
             {
-                "continue": "classify",      # Autenticado, continuar
-                "need_input": END,           # 🎯 RAMA A END: Esperando credenciales
-                "escalate": "escalate"       # Demasiados intentos
+                "continue": "classify",           # ✅ Información completa
+                "need_input": END,                # 🔄 Esperando respuesta del usuario
+                "cancelled": END,                 # 🚫 Usuario canceló
+                "escalate": "escalate"            # ⚠️ Error o máximo intentos
             }
         )
         
-        # CLASSIFY: Puede solicitar clarificación y terminar, o continuar
+        # CLASSIFY: Routing mejorado
         graph.add_conditional_edges(
             "classify",
-            self.route_classify,
+            self.route_classify_enhanced,
             {
-                "incident": "collect_incident",  # Es incidencia
-                "query": "search_knowledge",     # Es consulta
-                "urgent": "escalate",            # Es urgente
-                "need_clarification": END,       # 🎯 RAMA A END: Necesita clarificación
-                "escalate": "escalate"           # No se pudo clasificar
+                "collect_details": "collect_incident",  # 📋 Incidencia detectada
+                "need_clarification": END,              # ❓ Necesita más info
+                "cancelled": END,                       # 🚫 Usuario canceló
+                "escalate": "escalate"                  # ⚠️ No se pudo clasificar
             }
         )
         
-        # COLLECT_INCIDENT: Puede solicitar más detalles y terminar, o continuar
+        # COLLECT_INCIDENT: Flujo básico por ahora
         graph.add_conditional_edges(
             "collect_incident",
             self.route_collect_incident,
             {
-                "search_solution": "search_solution",  # Info completa
-                "need_details": END,                    # 🎯 RAMA A END: Necesita más detalles
-                "escalate": "escalate"                  # Demasiados intentos
+                "search_solution": "search_knowledge",
+                "need_details": END,
+                "escalate": "escalate"
             }
         )
         
-        # SEARCH_SOLUTION: Siempre continúa (no solicita input del usuario)
-        graph.add_conditional_edges(
-            "search_solution",
-            self.route_search_solution,
-            {
-                "verify": "verify",         # Solución encontrada
-                "escalate": "escalate"      # No hay solución
-            }
-        )
-        
-        # SEARCH_KNOWLEDGE: Siempre continúa (no solicita input del usuario)
+        # SEARCH_KNOWLEDGE: Flujo básico
         graph.add_conditional_edges(
             "search_knowledge",
             self.route_search_knowledge,
             {
-                "finalize": "finalize",     # Información encontrada
-                "escalate": "escalate"      # No hay información
+                "resolved": "finalize",
+                "escalate": "escalate",
+                "need_clarification": END
             }
         )
         
-        # VERIFY: Puede solicitar confirmación y terminar, o continuar
-        graph.add_conditional_edges(
-            "verify",
-            self.route_verify,
-            {
-                "finalize": "finalize",         # Problema resuelto
-                "need_confirmation": END,       # 🎯 RAMA A END: Esperando confirmación
-                "escalate": "escalate"          # No se resolvió
-            }
-        )
-        
-        # ESCALATE y FINALIZE siempre terminan
+        # ESCALATE y FINALIZE van a END
         graph.add_edge("escalate", "finalize")
         graph.add_edge("finalize", END)
         
-        self.logger.info("✅ Grafo construido exitosamente con ramas a END")
+        self.logger.info("✅ Grafo construido con nodos mejorados")
         
         return graph
     
-    def _add_mock_nodes(self, graph: StateGraph):
-        """Agregar nodos mock para desarrollo cuando los reales no están disponibles"""
-        self.logger.warning("⚠️ Usando nodos mock para desarrollo")
+    # ========== ROUTING FUNCTIONS MEJORADAS ==========
+    
+    def route_authenticate_enhanced(self, state: EroskiState) -> Literal["continue", "need_input", "cancelled", "escalate"]:
+        """
+        Routing mejorado para nodo de autenticación.
+        """
+        self.logger.info("🔄 Routing authenticate enhanced")
         
-        async def mock_node(state: EroskiState):
-            from langgraph.types import Command
-            from langchain_core.messages import AIMessage
-            from datetime import datetime
-            
-            node_name = state.get("current_node", "unknown")
-            
-            return Command(update={
-                "messages": state.get("messages", []) + [
-                    AIMessage(content=f"Nodo mock: {node_name} - En desarrollo")
-                ],
-                "current_node": node_name,
-                "last_activity": datetime.now(),
-                "escalation_needed": True,
-                "escalation_reason": f"Nodo {node_name} no implementado"
-            })
+        # Verificar cancelación
+        if state.get("cancelled"):
+            self.logger.info("🚫 Usuario canceló en autenticación")
+            return "cancelled"
         
-        # Agregar nodos mock
-        for node_name in ["authenticate", "classify", "collect_incident", 
-                         "search_solution", "search_knowledge", "escalate", 
-                         "verify", "finalize"]:
-            graph.add_node(node_name, mock_node)
+        # Verificar escalación
+        if state.get("escalation_needed"):
+            self.logger.info("⚠️ Escalación necesaria en autenticación")
+            return "escalate"
+        
+        # Verificar si está listo para continuar
+        if state.get("ready_for_classification"):
+            self.logger.info("✅ Autenticación completa - continuando a clasificación")
+            return "continue"
+        
+        # Por defecto, necesita más input del usuario
+        self.logger.info("🔄 Esperando más información del usuario")
+        return "need_input"
+    
+    def route_classify_enhanced(self, state: EroskiState) -> Literal["collect_details", "need_clarification", "cancelled", "escalate"]:
+        """
+        Routing mejorado para nodo de clasificación.
+        """
+        self.logger.info("🔄 Routing classify enhanced")
+        
+        # Verificar cancelación
+        if state.get("cancelled"):
+            self.logger.info("🚫 Usuario canceló en clasificación")
+            return "cancelled"
+        
+        # Verificar escalación
+        if state.get("escalation_needed"):
+            self.logger.info("⚠️ Escalación necesaria en clasificación")
+            return "escalate"
+        
+        # Verificar si se detectó incidencia
+        query_type = state.get("query_type")
+        confidence = state.get("confidence_score", 0)
+        
+        if query_type == ConsultaType.INCIDENCIA and confidence > 0.6:
+            self.logger.info("🔧 Incidencia detectada - recopilando detalles")
+            return "collect_details"
+        
+        # Verificar si hay clasificación de consulta
+        if query_type == ConsultaType.CONSULTA and confidence > 0.6:
+            self.logger.info("❓ Consulta general detectada - buscando conocimiento")
+            return "collect_details"  # Por ahora mismo flujo
+        
+        # Por defecto, necesita clarificación
+        self.logger.info("❓ Necesita clarificación del usuario")
+        return "need_clarification"
+    
+    def route_collect_incident(self, state: EroskiState) -> Literal["search_solution", "need_details", "escalate"]:
+        """
+        Routing para recopilar detalles de incidencia.
+        """
+        # Lógica básica por ahora
+        if state.get("escalation_needed"):
+            return "escalate"
+        
+        incident_details = state.get("incident_details")
+        if incident_details and len(incident_details) > 2:  # Suficientes detalles
+            return "search_solution"
+        else:
+            return "need_details"
+    
+    def route_search_knowledge(self, state: EroskiState) -> Literal["resolved", "escalate", "need_clarification"]:
+        """
+        Routing para búsqueda de conocimiento.
+        """
+        # Lógica básica por ahora
+        if state.get("escalation_needed"):
+            return "escalate"
+        elif state.get("solution_found"):
+            return "resolved"
+        else:
+            return "need_clarification"
+    
+    # ========== NODOS MOCK TEMPORALES ==========
+    
+    async def _mock_collect_incident(self, state: EroskiState):
+        """Nodo temporal para recopilar detalles de incidencia"""
+        from langgraph.types import Command
+        from langchain_core.messages import AIMessage
+        from datetime import datetime
+        
+        self.logger.info("📋 Mock: Recopilando detalles de incidencia")
+        
+        incident_type = state.get("incident_type", "problema técnico")
+        
+        message = f"""📋 **Recopilando detalles de la incidencia**
+
+He identificado que tienes un problema de tipo: **{incident_type}**
+
+Para ayudarte mejor, necesito algunos detalles adicionales:
+
+🔧 **¿Qué equipo específico está afectado?** (ej: TPV Caja 3, Impresora etiquetas)
+⏰ **¿Cuándo comenzó el problema?** (ej: esta mañana, después de reiniciar)
+❌ **¿Qué mensaje de error aparece?** (si aplica)
+🔄 **¿Has intentado alguna solución?** (ej: reiniciar, cambiar papel)
+
+*(En desarrollo - nodo temporal)*"""
+        
+        return Command(update={
+            "current_node": "collect_incident",
+            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "awaiting_user_input": True,
+            "last_activity": datetime.now(),
+            "incident_details": {"stage": "collecting"}
+        })
+    
+    async def _mock_search_knowledge(self, state: EroskiState):
+        """Nodo temporal para búsqueda de conocimiento"""
+        from langgraph.types import Command
+        from langchain_core.messages import AIMessage
+        from datetime import datetime
+        
+        self.logger.info("🔍 Mock: Buscando soluciones")
+        
+        message = """🔍 **Buscando soluciones**
+
+Estoy consultando la base de conocimiento para encontrar soluciones a tu problema...
+
+📚 **Consultando:**
+• Base de datos de soluciones técnicas
+• Procedimientos de Eroski
+• Casos similares resueltos
+
+*(En desarrollo - nodo temporal)*
+
+Por ahora te derivaré a soporte técnico:
+📞 **+34 946 211 000 (ext. 123)**"""
+        
+        return Command(update={
+            "current_node": "search_knowledge",
+            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "escalation_needed": True,
+            "escalation_reason": "Nodo search_knowledge en desarrollo",
+            "last_activity": datetime.now()
+        })
+    
+    async def _mock_escalate(self, state: EroskiState):
+        """Nodo temporal para escalación"""
+        from langgraph.types import Command
+        from langchain_core.messages import AIMessage
+        from datetime import datetime
+        
+        self.logger.info("⚠️ Mock: Escalando a supervisor")
+        
+        escalation_reason = state.get("escalation_reason", "Escalación solicitada")
+        
+        message = f"""🔼 **Escalando a supervisor**
+
+**Motivo:** {escalation_reason}
+
+📞 **Te he conectado con soporte técnico:**
+• **Teléfono:** +34 946 211 000 (ext. 123)
+• **Email:** soporte.tecnico@eroski.es
+
+**Información de tu caso:**
+🆔 **Sesión:** {state.get('session_id', 'N/A')}
+👤 **Empleado:** {state.get('employee_name', 'N/A')}
+🏪 **Tienda:** {state.get('incident_store_name', 'N/A')}
+📍 **Sección:** {state.get('incident_section', 'N/A')}
+
+Un especialista te atenderá pronto. ¡Gracias por tu paciencia! 🙏"""
+        
+        return Command(update={
+            "current_node": "escalate",
+            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "escalated": True,
+            "awaiting_user_input": False,
+            "last_activity": datetime.now()
+        })
+    
+    async def _mock_finalize(self, state: EroskiState):
+        """Nodo temporal para finalización"""
+        from langgraph.types import Command
+        from langchain_core.messages import AIMessage
+        from datetime import datetime
+        
+        self.logger.info("✅ Mock: Finalizando conversación")
+        
+        message = """✅ **Conversación finalizada**
+
+Gracias por usar el asistente de incidencias de Eroski.
+
+**Resumen de la sesión:**
+👤 **Empleado:** {employee_name}
+🏪 **Tienda:** {store_name}
+📍 **Sección:** {section}
+⏰ **Duración:** {duration}
+
+Si necesitas más ayuda, no dudes en contactarnos nuevamente.
+
+¡Que tengas un buen día! 😊""".format(
+            employee_name=state.get('employee_name', 'N/A'),
+            store_name=state.get('incident_store_name', 'N/A'),
+            section=state.get('incident_section', 'N/A'),
+            duration="N/A"  # Calcular duración real si es necesario
+        )
+        
+        return Command(update={
+            "current_node": "finalize",
+            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "conversation_ended": True,
+            "awaiting_user_input": False,
+            "last_activity": datetime.now()
+        })
     
     def compile_with_checkpointer(self, checkpointer=None) -> StateGraph:
         """
-        Compilar el workflow con checkpointer para persistencia de estado.
-        
-        Args:
-            checkpointer: Checkpointer personalizado (opcional)
-            
-        Returns:
-            Grafo compilado con persistencia
+        Compilar el workflow con checkpointer.
         """
         if checkpointer is None:
             checkpointer = self.memory
             
         graph = self.build_graph()
         
+        self.logger.info("🔗 Compilando grafo con checkpointer")
+        
         return graph.compile(
             checkpointer=checkpointer,
             interrupt_before=[]  # Sin interrupciones automáticas
         )
     
-    # ========== FUNCIONES DE ROUTING ==========
-    
-    def route_authenticate(self, state: EroskiState) -> Literal["continue", "need_input", "escalate"]:
+    def get_workflow_metrics(self, state: EroskiState) -> Dict[str, Any]:
         """
-        Routing para nodo de autenticación.
-        
-        Args:
-            state: Estado actual
-            
-        Returns:
-            Siguiente acción a tomar
-        """
-        self.logger.info(f"🌄JGL Entrada en el router de autenticación")
-        self.logger.info(f"🌄JGL employee_email: {state.get('employee_email')}")
-        self.logger.info(f"🌄JGL store_name: {state.get('store_name')}")
-        self.logger.info(f"🌄JGL authenticated: {state.get('authenticated')}")
-
-        
-        # Si ya está autenticado, continuar
-        if (state.get("employee_email") and 
-            state.get("store_name") and 
-            state.get("authenticated")):
-            self.logger.info(f"✅ Empleado autenticado: {state.get('employee_name')}")
-            return "continue"
-        
-        # Si hay demasiados intentos, escalar
-        attempts = state.get("attempts", 0)
-        if attempts >= 3:
-            self.logger.warning(f"⚠️ Límite de intentos de autenticación alcanzado: {attempts}")
-            return "escalate"
-        
-        # Necesita información del usuario
-        self.logger.info("📥 Solicitando credenciales del usuario")
-        return "need_input"
-    
-    def route_classify(self, state: EroskiState) -> Literal["incident", "query", "urgent", "need_clarification", "escalate"]:
-        """
-        Routing para nodo de clasificación.
-        
-        Args:
-            state: Estado actual
-            
-        Returns:
-            Siguiente acción a tomar
-        """
-        query_type = state.get("query_type")
-        confidence = state.get("confidence_score", 0)
-        
-        # Si tenemos clasificación con buena confianza
-        if query_type and confidence >= 0.6:
-            if query_type == ConsultaType.URGENTE:
-                self.logger.info("🚨 Consulta urgente detectada")
-                return "urgent"
-            elif query_type == ConsultaType.INCIDENCIA:
-                self.logger.info("🔧 Incidencia detectada")
-                return "incident"
-            elif query_type == ConsultaType.CONSULTA:
-                self.logger.info("❓ Consulta general detectada")
-                return "query"
-        
-        # Si hay demasiados intentos de clarificación, escalar
-        attempts = state.get("attempts", 0)
-        if attempts >= 2:
-            self.logger.warning("⚠️ Demasiados intentos de clarificación")
-            return "escalate"
-        
-        # Necesita clarificación del usuario
-        self.logger.info("❔ Solicitando clarificación del tipo de consulta")
-        return "need_clarification"
-    
-    def route_collect_incident(self, state: EroskiState) -> Literal["search_solution", "need_details", "escalate"]:
-        """
-        Routing para recopilar detalles de incidencia.
-        
-        Args:
-            state: Estado actual
-            
-        Returns:
-            Siguiente acción a tomar
-        """
-        # Verificar si tenemos información suficiente
-        incident_type = state.get("incident_type")
-        incident_description = state.get("incident_description", "")
-        
-        if incident_type and len(incident_description) >= 20:
-            self.logger.info(f"✅ Información de incidencia completa: {incident_type}")
-            return "search_solution"
-        
-        # Si hay demasiados intentos, escalar
-        attempts = state.get("attempts", 0)
-        if attempts >= 3:
-            self.logger.warning("⚠️ Límite de intentos para recopilar información alcanzado")
-            return "escalate"
-        
-        # Necesita más detalles del usuario
-        self.logger.info("📝 Solicitando más detalles de la incidencia")
-        return "need_details"
-    
-    def route_search_solution(self, state: EroskiState) -> Literal["verify", "escalate"]:
-        """
-        Routing después de buscar solución.
-        
-        Args:
-            state: Estado actual
-            
-        Returns:
-            Siguiente acción a tomar
-        """
-        solution_found = state.get("solution_found", False)
-        
-        if solution_found:
-            self.logger.info("✅ Solución encontrada, verificando con usuario")
-            return "verify"
-        else:
-            self.logger.info("❌ No se encontró solución automática, escalando")
-            return "escalate"
-    
-    def route_search_knowledge(self, state: EroskiState) -> Literal["finalize", "escalate"]:
-        """
-        Routing después de buscar en base de conocimiento.
-        
-        Args:
-            state: Estado actual
-            
-        Returns:
-            Siguiente acción a tomar
-        """
-        solution_found = state.get("solution_found", False)
-        
-        if solution_found:
-            self.logger.info("✅ Información encontrada en base de conocimiento")
-            return "finalize"
-        else:
-            self.logger.info("❌ No se encontró información relevante, escalando")
-            return "escalate"
-    
-    def route_verify(self, state: EroskiState) -> Literal["finalize", "need_confirmation", "escalate"]:
-        """
-        Routing para verificación de resolución.
-        
-        Args:
-            state: Estado actual
-            
-        Returns:
-            Siguiente acción a tomar
-        """
-        # Si ya tenemos confirmación del usuario
-        if "resolved" in state:
-            if state["resolved"]:
-                self.logger.info("✅ Problema confirmado como resuelto")
-                return "finalize"
-            else:
-                self.logger.info("❌ Usuario confirma que problema no está resuelto")
-                return "escalate"
-        
-        # Si hay demasiados intentos de verificación, escalar
-        attempts = state.get("attempts", 0)
-        if attempts >= 2:
-            self.logger.warning("⚠️ Demasiados intentos de verificación")
-            return "escalate"
-        
-        # Necesita confirmación del usuario
-        self.logger.info("✓ Solicitando confirmación de resolución")
-        return "need_confirmation"
-    
-    # ========== MÉTODOS AUXILIARES ==========
-    
-    def should_escalate_urgency(self, state: EroskiState) -> bool:
-        """
-        Determinar si se debe escalar por urgencia.
-        
-        Args:
-            state: Estado actual
-            
-        Returns:
-            True si debe escalar por urgencia
-        """
-        urgency_level = state.get("urgency_level")
-        if not urgency_level:
-            return False
-        
-        # Escalar si es urgencia alta o crítica
-        return urgency_level.value >= 3 if hasattr(urgency_level, 'value') else urgency_level >= 3
-    
-    def has_complete_incident_info(self, state: EroskiState) -> bool:
-        """
-        Verificar si tenemos información completa de la incidencia.
-        
-        Args:
-            state: Estado actual
-            
-        Returns:
-            True si la información está completa
-        """
-        required_fields = [
-            "incident_type",
-            "incident_description"
-        ]
-        
-        for field in required_fields:
-            value = state.get(field)
-            if not value:
-                return False
-            
-            # Verificar longitud mínima para descripción
-            if field == "incident_description" and len(str(value)) < 10:
-                return False
-        
-        return True
-    
-    def get_execution_metrics(self, state: EroskiState) -> Dict[str, Any]:
-        """
-        Obtener métricas de ejecución del workflow.
-        
-        Args:
-            state: Estado actual
-            
-        Returns:
-            Diccionario con métricas
+        Obtener métricas del workflow.
         """
         from datetime import datetime
         
@@ -464,45 +383,41 @@ class EroskiFinalWorkflow(BaseWorkflow):
         return {
             "session_id": state.get("session_id"),
             "employee_id": state.get("employee_id"),
-            "store_id": state.get("store_id"),
+            "store_id": state.get("incident_store_code"),
+            "store_name": state.get("incident_store_name"),
+            "section": state.get("incident_section"),
             "current_node": state.get("current_node"),
             "execution_path": execution_path,
             "total_nodes_visited": len(execution_path),
             "total_time_minutes": (current_time - start_time).total_seconds() / 60 if start_time else 0,
-            "resolved": state.get("resolved", False),
+            "authenticated": state.get("authenticated", False),
+            "ready_for_classification": state.get("ready_for_classification", False),
             "escalated": state.get("escalation_needed", False),
+            "cancelled": state.get("cancelled", False),
             "query_type": state.get("query_type"),
             "incident_type": state.get("incident_type"),
-            "workflow_name": self.name
+            "workflow_name": self.name,
+            "using_enhanced_nodes": True
         }
 
 # ========== FUNCIONES DE CONVENIENCIA ==========
 
 def create_eroski_workflow() -> EroskiFinalWorkflow:
     """
-    Crear y configurar el workflow principal de Eroski.
-    
-    Returns:
-        Instancia del workflow principal
+    Crear y configurar el workflow principal de Eroski con nodos mejorados.
     """
     return EroskiFinalWorkflow()
 
 def get_compiled_eroski_graph():
     """
-    Obtener grafo compilado listo para usar.
-    
-    Returns:
-        Grafo compilado con checkpointer
+    Obtener grafo compilado listo para usar con nodos mejorados.
     """
     workflow = create_eroski_workflow()
     return workflow.compile_with_checkpointer()
 
 def get_workflow_description() -> str:
     """
-    Obtener descripción del workflow.
-    
-    Returns:
-        Descripción textual del workflow
+    Obtener descripción del workflow mejorado.
     """
     workflow = create_eroski_workflow()
     return workflow.get_workflow_description()

@@ -496,3 +496,22 @@ SAMPLE_INCIDENT_CONFIG = {
         }
     }
 }
+
+
+# ========== EXPORTS PARA LANGGRAPH ==========
+async def classify_query_node(state: EroskiState) -> Command:
+    """
+    Wrapper function principal para LangGraph.
+    """
+    node = ClassifyQueryNodeEnhanced()
+    return await node.execute(state)
+
+# Alias de compatibilidad  
+classify_query_node_enhanced = classify_query_node
+
+# Exports
+__all__ = [
+    "ClassifyQueryNodeEnhanced",
+    "classify_query_node", 
+    "classify_query_node_enhanced"
+]

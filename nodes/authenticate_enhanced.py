@@ -22,7 +22,7 @@ import re
 from models.eroski_state import EroskiState
 from nodes.base_node import BaseNode
 from utils.eroski_database_auth import EroskiEmployeeDatabaseAuth
-from utils.llm_client import get_llm
+from utils.llm.providers import get_llm
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
@@ -644,7 +644,7 @@ Ha ocurrido un problema durante la autenticación.
 # Wrapper para LangGraph
 # =====================================================
 
-async def authenticate_employee_node_complete(state: EroskiState) -> Command:
+async def authenticate_employee_node(state: EroskiState) -> Command:
     """
     Wrapper function para el nodo de autenticación completo.
     """

@@ -2,7 +2,7 @@
 # utils/eroski_database_auth.py - ACTUALIZADO PARA ESTRUCTURA REAL
 # =====================================================
 """
-EroskiDatabaseEmployeeValidator adaptado a la estructura real de la tabla usuarios.
+EroskiEmployeeDatabaseAuth adaptado a la estructura real de la tabla usuarios.
 
 ESTRUCTURA REAL:
 - id, nombre, apellido, email, numero_empleado (VARCHAR(4))
@@ -21,7 +21,7 @@ from utils.database.connection_manager import get_connection_manager
 
 logger = logging.getLogger("EroskiDatabaseAuth")
 
-class EroskiDatabaseEmployeeValidator:
+class EroskiEmployeeDatabaseAuth:
     """
     Validador de empleados adaptado a la estructura real de PostgreSQL.
     
@@ -309,13 +309,13 @@ class EroskiDatabaseEmployeeValidator:
 
 # ========== INSTANCIAS GLOBALES ==========
 
-_global_database_validator: Optional[EroskiDatabaseEmployeeValidator] = None
+_global_database_validator: Optional[EroskiEmployeeDatabaseAuth] = None
 
-def get_database_employee_validator() -> EroskiDatabaseEmployeeValidator:
+def get_database_employee_validator() -> EroskiEmployeeDatabaseAuth:
     """Obtener instancia global del validador de base de datos"""
     global _global_database_validator
     if _global_database_validator is None:
-        _global_database_validator = EroskiDatabaseEmployeeValidator()
+        _global_database_validator = EroskiEmployeeDatabaseAuth()
     return _global_database_validator
 
 # ========== FUNCIONES DE CONVENIENCIA ==========
@@ -337,3 +337,5 @@ async def search_employees_db(search_term: str, limit: int = 10) -> List[Dict[st
     """Función de conveniencia para buscar empleados desde BD"""
     validator = get_database_employee_validator()
     return await validator.search_employees(search_term, limit)
+
+
