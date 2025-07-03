@@ -1,210 +1,350 @@
 # =====================================================
-# utils/database/user_repository.py - Repositorio de usuarios
+# utils/database/user_repository.py - CORREGIDO PARA ESTRUCTURA REAL
 # =====================================================
-from models.user import UsuarioDB, UsuarioCreate, UsuarioUpdate, EstadoUsuario
-from typing import Optional, List
+"""
+UserRepository adaptado a la estructura real de la tabla usuarios:
+
+COLUMNAS REALES:
+- id
+- nombre  
+- apellido
+- email
+- numero_empleado (VARCHAR(4))
+- rol
+- departamento  
+- activo (boolean)
+- created_at
+- updated_at
+"""
+
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+import logging
+
 from .base_repository import BaseRepository
-import asyncpg
 
-
-class UserRepository(BaseRepository[UsuarioDB]):
-    """Repositorio para operaciones de usuarios"""
+class UserRepository(BaseRepository):
+    """Repositorio para operaciones de usuarios - ADAPTADO A ESTRUCTURA REAL"""
     
-    async def buscar_por_email(self, email: str) -> Optional[UsuarioDB]:
+    def __init__(self, connection_manager):
+        super().__init__(connection_manager)
+        self.logger = logging.getLogger("UserRepository")
+    
+    async def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """
-        Buscar usuario por email.
+        Obtener usuario por email usando la estructura real de BD.
         
         Args:
             email: Email a buscar
             
         Returns:
-            UsuarioDB si se encuentra, None si no existe
+            Diccionario con datos del usuario o None si no existe
         """
-        query = """
-            SELECT id, nombre, apellido, email, numero_empleado, 
-                   rol, departamento, estado, fecha_creacion, 
-                   fecha_actualizacion, ultimo_acceso
-            FROM usuarios 
-            WHERE LOWER(email) = LOWER($1) AND estado = $2
-        """
-        
         try:
-            row = await self.fetch_one(query, email, EstadoUsuario.ACTIVO.value)
+            # 🔥 CORRECCIÓN: Query adaptado a estructura real
+            query = """
+                SELECT id, nombre, apellido, email, numero_empleado, 
+                       rol, departamento, activo, created_at, updated_at
+                FROM usuarios 
+                WHERE LOWER(email) = LOWER($1) AND activo = true
+            """
+            
+            row = await self.fetch_one(query, email)
             
             if row:
-                return UsuarioDB(
-                    id=row['id'],
-                    nombre=row['nombre'],
-                    apellido=row['apellido'],
-                    email=row['email'],
-                    numero_empleado=row['numero_empleado'],
-                    rol=row['rol'],
-                    departamento=row['departamento'],
-                    estado=EstadoUsuario(row['estado']),
-                    fecha_creacion=row['fecha_creacion'],
-                    fecha_actualizacion=row['fecha_actualizacion'],
-                    ultimo_acceso=row['ultimo_acceso']
-                )
-            
-            self.logger.info(f"🔍 Usuario {'encontrado' if row else 'no encontrado'}: {email}")
-            return None
-            
+                user_data = {
+                    "id": row["id"],
+                    "nombre": row["nombre"],
+                    "apellido": row["apellido"], 
+                    "email": row["email"],
+                    "numero_empleado": row["numero_empleado"],
+                    "rol": row["rol"],
+                    "departamento": row["departamento"],
+                    "activo": row["activo"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    # Campos derivados para compatibilidad
+                    "nombre_completo": f"{row['nombre']} {row['apellido']}",
+                    "estado": "activo" if row["activo"] else "inactivo"
+                }
+                
+                self.logger.info(f"✅ Usuario encontrado: {user_data['nombre_completo']} ({email})")
+                return user_data
+            else:
+                self.logger.info(f"❌ Usuario no encontrado: {email}")
+                return None
+                
         except Exception as e:
             self.logger.error(f"❌ Error buscando usuario por email {email}: {e}")
             raise
     
-    async def buscar_por_numero_empleado(self, numero: str) -> Optional[UsuarioDB]:
-        """Buscar usuario por número de empleado"""
-        query = """
-            SELECT id, nombre, apellido, email, numero_empleado,
-                   rol, departamento, estado, fecha_creacion,
-                   fecha_actualizacion, ultimo_acceso
-            FROM usuarios 
-            WHERE numero_empleado = $1 AND estado = $2
+    async def get_by_numero_empleado(self, numero_empleado: str) -> Optional[Dict[str, Any]]:
         """
+        Obtener usuario por número de empleado.
         
+        Args:
+            numero_empleado: Número de empleado (4 caracteres)
+            
+        Returns:
+            Diccionario con datos del usuario o None si no existe
+        """
         try:
-            row = await self.fetch_one(query, numero, EstadoUsuario.ACTIVO.value)
+            query = """
+                SELECT id, nombre, apellido, email, numero_empleado,
+                       rol, departamento, activo, created_at, updated_at
+                FROM usuarios 
+                WHERE numero_empleado = $1 AND activo = true
+            """
+            
+            row = await self.fetch_one(query, numero_empleado)
             
             if row:
-                return UsuarioDB(**dict(row))
+                user_data = {
+                    "id": row["id"],
+                    "nombre": row["nombre"],
+                    "apellido": row["apellido"],
+                    "email": row["email"],
+                    "numero_empleado": row["numero_empleado"],
+                    "rol": row["rol"],
+                    "departamento": row["departamento"],
+                    "activo": row["activo"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "nombre_completo": f"{row['nombre']} {row['apellido']}",
+                    "estado": "activo" if row["activo"] else "inactivo"
+                }
+                
+                self.logger.info(f"✅ Usuario encontrado por número: {user_data['nombre_completo']} ({numero_empleado})")
+                return user_data
             
             return None
             
         except Exception as e:
-            self.logger.error(f"❌ Error buscando por número de empleado {numero}: {e}")
+            self.logger.error(f"❌ Error buscando por número de empleado {numero_empleado}: {e}")
             raise
     
-    async def actualizar_nombre(self, email: str, nombre: str, apellido: str) -> bool:
+    async def update_last_access(self, user_id: int) -> bool:
         """
-        Actualizar nombre y apellido de usuario.
+        Actualizar timestamp de acceso (usando updated_at ya que no hay ultimo_acceso).
         
         Args:
-            email: Email del usuario
-            nombre: Nuevo nombre
-            apellido: Nuevo apellido
+            user_id: ID del usuario
             
         Returns:
             True si se actualizó correctamente
         """
-        query = """
-            UPDATE usuarios 
-            SET nombre = $2, apellido = $3, fecha_actualizacion = NOW()
-            WHERE LOWER(email) = LOWER($1) AND estado = $4
-        """
-        
         try:
-            result = await self.execute_query(query, email, nombre, apellido, EstadoUsuario.ACTIVO.value)
+            # 🔥 CORRECCIÓN: Usar updated_at ya que ultimo_acceso no existe
+            query = """
+                UPDATE usuarios 
+                SET updated_at = NOW() 
+                WHERE id = $1 AND activo = true
+            """
             
-            # Verificar si se actualizó algún registro
-            updated = result.split()[-1] == "1"
-            
-            if updated:
-                self.logger.info(f"✅ Nombre actualizado para {email}: {nombre} {apellido}")
-            else:
-                self.logger.warning(f"⚠️ No se encontró usuario para actualizar: {email}")
-            
-            return updated
+            result = await self.execute_query(query, user_id)
+            self.logger.info(f"✅ Timestamp actualizado para usuario {user_id}")
+            return True
             
         except Exception as e:
-            self.logger.error(f"❌ Error actualizando nombre para {email}: {e}")
-            raise
+            self.logger.error(f"❌ Error actualizando timestamp: {e}")
+            return False
     
-    async def crear_usuario(self, usuario_data: UsuarioCreate) -> Optional[UsuarioDB]:
+    async def get_all_active_users(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Obtener todos los usuarios activos.
+        
+        Args:
+            limit: Límite de usuarios a retornar
+            
+        Returns:
+            Lista de usuarios activos
+        """
+        try:
+            query = """
+                SELECT id, nombre, apellido, email, numero_empleado,
+                       rol, departamento, activo, created_at, updated_at
+                FROM usuarios 
+                WHERE activo = true
+                ORDER BY apellido, nombre
+                LIMIT $1
+            """
+            
+            rows = await self.fetch_many(query, limit)
+            
+            users = []
+            for row in rows:
+                user_data = {
+                    "id": row["id"],
+                    "nombre": row["nombre"],
+                    "apellido": row["apellido"],
+                    "email": row["email"],
+                    "numero_empleado": row["numero_empleado"],
+                    "rol": row["rol"],
+                    "departamento": row["departamento"],
+                    "activo": row["activo"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "nombre_completo": f"{row['nombre']} {row['apellido']}",
+                    "estado": "activo"
+                }
+                users.append(user_data)
+            
+            self.logger.info(f"✅ Obtenidos {len(users)} usuarios activos")
+            return users
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error obteniendo usuarios activos: {e}")
+            return []
+    
+    async def search_users_by_name(self, search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Buscar usuarios por nombre o apellido.
+        
+        Args:
+            search_term: Término de búsqueda
+            limit: Límite de resultados
+            
+        Returns:
+            Lista de usuarios que coinciden
+        """
+        try:
+            query = """
+                SELECT id, nombre, apellido, email, numero_empleado,
+                       rol, departamento, activo, created_at, updated_at
+                FROM usuarios 
+                WHERE activo = true 
+                AND (
+                    LOWER(nombre) LIKE LOWER($1) OR 
+                    LOWER(apellido) LIKE LOWER($1) OR
+                    LOWER(CONCAT(nombre, ' ', apellido)) LIKE LOWER($1)
+                )
+                ORDER BY apellido, nombre
+                LIMIT $2
+            """
+            
+            search_pattern = f"%{search_term}%"
+            rows = await self.fetch_many(query, search_pattern, limit)
+            
+            users = []
+            for row in rows:
+                user_data = {
+                    "id": row["id"],
+                    "nombre": row["nombre"],
+                    "apellido": row["apellido"],
+                    "email": row["email"],
+                    "numero_empleado": row["numero_empleado"],
+                    "rol": row["rol"],
+                    "departamento": row["departamento"],
+                    "activo": row["activo"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "nombre_completo": f"{row['nombre']} {row['apellido']}",
+                    "estado": "activo"
+                }
+                users.append(user_data)
+            
+            self.logger.info(f"✅ Encontrados {len(users)} usuarios para '{search_term}'")
+            return users
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error buscando usuarios: {e}")
+            return []
+    
+    async def get_users_by_department(self, department: str) -> List[Dict[str, Any]]:
+        """
+        Obtener usuarios por departamento.
+        
+        Args:
+            department: Nombre del departamento
+            
+        Returns:
+            Lista de usuarios del departamento
+        """
+        try:
+            query = """
+                SELECT id, nombre, apellido, email, numero_empleado,
+                       rol, departamento, activo, created_at, updated_at
+                FROM usuarios 
+                WHERE activo = true AND LOWER(departamento) = LOWER($1)
+                ORDER BY apellido, nombre
+            """
+            
+            rows = await self.fetch_many(query, department)
+            
+            users = []
+            for row in rows:
+                user_data = {
+                    "id": row["id"],
+                    "nombre": row["nombre"],
+                    "apellido": row["apellido"],
+                    "email": row["email"],
+                    "numero_empleado": row["numero_empleado"],
+                    "rol": row["rol"],
+                    "departamento": row["departamento"],
+                    "activo": row["activo"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "nombre_completo": f"{row['nombre']} {row['apellido']}",
+                    "estado": "activo"
+                }
+                users.append(user_data)
+            
+            self.logger.info(f"✅ Encontrados {len(users)} usuarios en departamento '{department}'")
+            return users
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error obteniendo usuarios por departamento: {e}")
+            return []
+    
+    async def create_user(self, user_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Crear nuevo usuario.
         
         Args:
-            usuario_data: Datos del usuario a crear
+            user_data: Datos del usuario a crear
             
         Returns:
-            UsuarioDB del usuario creado o None si hubo error
+            Usuario creado o None si hubo error
         """
-        query = """
-            INSERT INTO usuarios (nombre, apellido, email, numero_empleado, rol, departamento, estado)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, nombre, apellido, email, numero_empleado, 
-                     rol, departamento, estado, fecha_creacion, fecha_actualizacion
-        """
-        
         try:
+            query = """
+                INSERT INTO usuarios (nombre, apellido, email, numero_empleado, rol, departamento, activo)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id, nombre, apellido, email, numero_empleado, rol, departamento, activo, created_at, updated_at
+            """
+            
             row = await self.fetch_one(
                 query,
-                usuario_data.nombre,
-                usuario_data.apellido,
-                usuario_data.email,
-                usuario_data.numero_empleado,
-                usuario_data.rol.value,
-                usuario_data.departamento,
-                EstadoUsuario.ACTIVO.value
+                user_data["nombre"],
+                user_data["apellido"],
+                user_data["email"],
+                user_data["numero_empleado"],
+                user_data["rol"],
+                user_data["departamento"],
+                user_data.get("activo", True)
             )
             
             if row:
-                usuario = UsuarioDB(**dict(row))
-                self.logger.info(f"✅ Usuario creado: {usuario.nombre_completo} ({usuario.numero_empleado})")
-                return usuario
+                created_user = {
+                    "id": row["id"],
+                    "nombre": row["nombre"],
+                    "apellido": row["apellido"],
+                    "email": row["email"],
+                    "numero_empleado": row["numero_empleado"],
+                    "rol": row["rol"],
+                    "departamento": row["departamento"],
+                    "activo": row["activo"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "nombre_completo": f"{row['nombre']} {row['apellido']}",
+                    "estado": "activo" if row["activo"] else "inactivo"
+                }
+                
+                self.logger.info(f"✅ Usuario creado: {created_user['nombre_completo']} ({created_user['email']})")
+                return created_user
             
             return None
             
-        except asyncpg.UniqueViolationError as e:
-            self.logger.warning(f"⚠️ Usuario ya existe: {usuario_data.email}")
-            raise ValueError(f"Usuario con email {usuario_data.email} ya existe")
         except Exception as e:
             self.logger.error(f"❌ Error creando usuario: {e}")
-            raise
-    
-    async def buscar_usuarios_similares(self, nombre: str, limite: int = 5) -> List[UsuarioDB]:
-        """
-        Buscar usuarios con nombres similares usando PostgreSQL similarity.
-        
-        Args:
-            nombre: Nombre a buscar
-            limite: Número máximo de resultados
-            
-        Returns:
-            Lista de usuarios similares
-        """
-        query = """
-            SELECT id, nombre, apellido, email, numero_empleado,
-                   rol, departamento, estado, fecha_creacion,
-                   fecha_actualizacion, ultimo_acceso,
-                   similarity(nombre || ' ' || apellido, $1) as sim_score
-            FROM usuarios 
-            WHERE estado = $2 
-              AND similarity(nombre || ' ' || apellido, $1) > 0.3
-            ORDER BY sim_score DESC
-            LIMIT $3
-        """
-        
-        try:
-            rows = await self.fetch_many(query, nombre, EstadoUsuario.ACTIVO.value, limite)
-            
-            usuarios = []
-            for row in rows:
-                usuario_dict = dict(row)
-                # Remover sim_score antes de crear el objeto
-                usuario_dict.pop('sim_score', None)
-                usuarios.append(UsuarioDB(**usuario_dict))
-            
-            self.logger.debug(f"🔍 Usuarios similares encontrados: {len(usuarios)} para '{nombre}'")
-            return usuarios
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error buscando usuarios similares: {e}")
-            return []
-    
-    async def actualizar_ultimo_acceso(self, user_id: int) -> bool:
-        """Actualizar timestamp de último acceso"""
-        query = """
-            UPDATE usuarios 
-            SET ultimo_acceso = NOW(), fecha_actualizacion = NOW()
-            WHERE id = $1
-        """
-        
-        try:
-            result = await self.execute_query(query, user_id)
-            return result.split()[-1] == "1"
-        except Exception as e:
-            self.logger.error(f"❌ Error actualizando último acceso: {e}")
-            return False
-
+            return None
