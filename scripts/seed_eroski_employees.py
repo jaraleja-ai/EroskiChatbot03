@@ -187,14 +187,61 @@ class EroskiEmployeeSeederV3:
             conn = await asyncpg.connect(self.connection_string)
             
             try:
-                # Limpiar datos existentes de Eroski
-                # Primero contar cuántos hay
+                # Verificar si hay datos existentes de Eroski
                 count_existing = await conn.fetchval("SELECT COUNT(*) FROM usuarios WHERE email LIKE '%@eroski.es'")
                 
-                # Luego eliminar
                 if count_existing > 0:
-                    await conn.execute("DELETE FROM usuarios WHERE email LIKE '%@eroski.es'")
-                    logger.info(f"🧹 {count_existing} registros previos de Eroski eliminados")
+                    logger.info(f"⚠️ Se encontraron {count_existing} empleados de Eroski existentes")
+                    print(f"\n¿Qué quieres hacer con los {count_existing} empleados existentes?")
+                    print("1. Eliminar y recrear todos los datos")
+                    print("2. Conservar datos existentes y salir")
+                    print("3. Agregar empleados con emails diferentes")
+                    
+                    opcion = input("Selecciona una opción (1/2/3): ").strip()
+                    
+                    if opcion == "1":
+                        logger.info(f"🧹 Limpiando {count_existing} registros previos de Eroski...")
+                        
+                        # 1. Primero eliminar incidencias que referencian empleados de Eroski
+                        try:
+                            inc_deleted = await conn.fetchval("""
+                                SELECT COUNT(*) FROM incidencias 
+                                WHERE numero_empleado IN (
+                                    SELECT numero_empleado FROM usuarios WHERE email LIKE '%@eroski.es'
+                                )
+                            """)
+                            
+                            if inc_deleted > 0:
+                                await conn.execute("""
+                                    DELETE FROM incidencias 
+                                    WHERE numero_empleado IN (
+                                        SELECT numero_empleado FROM usuarios WHERE email LIKE '%@eroski.es'
+                                    )
+                                """)
+                                logger.info(f"   🎫 {inc_deleted} incidencias relacionadas eliminadas")
+                        except Exception as e:
+                            logger.warning(f"   ⚠️ Error eliminando incidencias: {e}")
+                        
+                        # 2. Luego eliminar usuarios de Eroski
+                        await conn.execute("DELETE FROM usuarios WHERE email LIKE '%@eroski.es'")
+                        logger.info(f"   👥 {count_existing} usuarios de Eroski eliminados")
+                        
+                    elif opcion == "2":
+                        logger.info("✅ Conservando datos existentes")
+                        await self._mostrar_resumen(conn)
+                        return True
+                        
+                    elif opcion == "3":
+                        logger.info("🔄 Generando empleados con sufijo único...")
+                        # Agregar sufijo a emails para evitar duplicados
+                        import time
+                        timestamp_suffix = str(int(time.time()))[-4:]  # Últimos 4 dígitos del timestamp
+                        email_suffix = f".{timestamp_suffix}"
+                    else:
+                        logger.info("❌ Opción no válida, saliendo...")
+                        return False
+                else:
+                    email_suffix = ""
                 
                 # Obtener estructura actual
                 usuarios_structure = await self.get_table_structure("usuarios")
@@ -205,7 +252,7 @@ class EroskiEmployeeSeederV3:
                 total_insertados = 0
                 
                 for tienda in self.tiendas_eroski:
-                    empleados_tienda = self._generar_empleados_para_tienda(tienda, column_info)
+                    empleados_tienda = self._generar_empleados_para_tienda(tienda, column_info, email_suffix)
                     
                     for empleado in empleados_tienda:
                         if await self._insertar_empleado_adaptativo(conn, empleado, available_columns, column_info):
@@ -225,7 +272,7 @@ class EroskiEmployeeSeederV3:
             logger.error(f"❌ Error insertando empleados de Eroski: {e}")
             return False
     
-    def _generar_empleados_para_tienda(self, tienda: Dict[str, Any], column_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _generar_empleados_para_tienda(self, tienda: Dict[str, Any], column_info: Dict[str, Any], email_suffix: str = "") -> List[Dict[str, Any]]:
         """Generar empleados de prueba para una tienda específica"""
         
         # Determinar valores válidos para 'rol' basado en restricciones
@@ -257,7 +304,7 @@ class EroskiEmployeeSeederV3:
                 "numero_empleado": f"G{tienda_num}01",  # G101, G201, G301
                 "nombre": "María Carmen",
                 "apellido": "González Ruiz",
-                "email": f"maria.gonzalez.{tienda['codigo'].lower()}@eroski.es",
+                "email": f"maria.gonzalez.{tienda['codigo'].lower()}{email_suffix}@eroski.es",
                 "rol": roles["gerente"],
                 "departamento": "Gerencia"
             },
@@ -266,7 +313,7 @@ class EroskiEmployeeSeederV3:
                 "numero_empleado": f"S{tienda_num}01",  # S101, S201, S301
                 "nombre": "Iker",
                 "apellido": "Etxeberria Aguirre",
-                "email": f"iker.etxeberria.{tienda['codigo'].lower()}@eroski.es",
+                "email": f"iker.etxeberria.{tienda['codigo'].lower()}{email_suffix}@eroski.es",
                 "rol": roles["supervisor"], 
                 "departamento": "Operaciones"
             },
@@ -275,7 +322,7 @@ class EroskiEmployeeSeederV3:
                 "numero_empleado": f"E{tienda_num}01",  # E101, E201, E301
                 "nombre": "Ainhoa",
                 "apellido": "Martínez López",
-                "email": f"ainhoa.martinez.{tienda['codigo'].lower()}@eroski.es",
+                "email": f"ainhoa.martinez.{tienda['codigo'].lower()}{email_suffix}@eroski.es",
                 "rol": roles["empleado"],
                 "departamento": "Frutería"
             },
@@ -283,7 +330,7 @@ class EroskiEmployeeSeederV3:
                 "numero_empleado": f"E{tienda_num}02",  # E102, E202, E302
                 "nombre": "Mikel",
                 "apellido": "Urrutia Fernández",
-                "email": f"mikel.urrutia.{tienda['codigo'].lower()}@eroski.es",
+                "email": f"mikel.urrutia.{tienda['codigo'].lower()}{email_suffix}@eroski.es",
                 "rol": roles["empleado"],
                 "departamento": "Carnicería"
             },
@@ -292,7 +339,7 @@ class EroskiEmployeeSeederV3:
                 "numero_empleado": f"E{tienda_num}03",  # E103, E203, E303
                 "nombre": "Leire",
                 "apellido": "Saenz de Urturi",
-                "email": f"leire.saenz.{tienda['codigo'].lower()}@eroski.es",
+                "email": f"leire.saenz.{tienda['codigo'].lower()}{email_suffix}@eroski.es",
                 "rol": roles["empleado"],
                 "departamento": "Caja"
             },
@@ -300,7 +347,7 @@ class EroskiEmployeeSeederV3:
                 "numero_empleado": f"E{tienda_num}04",  # E104, E204, E304
                 "nombre": "Jon",
                 "apellido": "Bilbao Echevarría",
-                "email": f"jon.bilbao.{tienda['codigo'].lower()}@eroski.es",
+                "email": f"jon.bilbao.{tienda['codigo'].lower()}{email_suffix}@eroski.es",
                 "rol": roles["empleado"],
                 "departamento": "Caja"
             }
