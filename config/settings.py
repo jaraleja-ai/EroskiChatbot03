@@ -1,19 +1,52 @@
 # =====================================================
-# config/settings.py - Configuración centralizada
+# config/settings.py - CORREGIDO para forzar .env
 # =====================================================
+"""
+Corrección para forzar que las variables del .env sobrescriban
+las variables del sistema operativo.
+"""
+
 from pydantic_settings import BaseSettings
 from typing import Optional, Literal
 from pydantic import ConfigDict
 from pathlib import Path
+import os
+
+# 🔥 SOLUCIÓN: Cargar .env manualmente con prioridad
+def load_env_with_override():
+    """Cargar .env manualmente con override de variables del sistema"""
+    
+    env_file = Path(".env")
+    if not env_file.exists():
+        return
+    
+    try:
+        from dotenv import load_dotenv
+        # 🔥 CLAVE: override=True fuerza que .env sobrescriba variables del sistema
+        load_dotenv(env_file, override=True)
+        
+        # Verificar que se cargó correctamente
+        if os.getenv('DB_NAME') == 'chatbot_db':
+            print("✅ Variables .env cargadas correctamente con override")
+        else:
+            print(f"⚠️ DB_NAME sigue siendo: {os.getenv('DB_NAME')}")
+            
+    except ImportError:
+        print("❌ python-dotenv no está instalado")
+    except Exception as e:
+        print(f"❌ Error cargando .env: {e}")
+
+# Cargar .env inmediatamente al importar este módulo
+load_env_with_override()
 
 class DatabaseSettings(BaseSettings):
     """Configuración de base de datos PostgreSQL"""
     
     host: str = "localhost"
     port: int = 5432
-    name: str = "chatbot_db"
+    name: str = "chatbot_db"  # 🔥 Default correcto
     user: str = "postgres"
-    password: str = ""  # Sin password por defecto para desarrollo
+    password: str = ""
     pool_min_size: int = 1
     pool_max_size: int = 10
     command_timeout: int = 60
@@ -32,11 +65,8 @@ class DatabaseSettings(BaseSettings):
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{test_db_name}"
 
 class LLMSettings(BaseSettings):
-    """
-    Configuración de LLM con soporte para Azure OpenAI
-    """
+    """Configuración de LLM con soporte para Azure OpenAI"""
     
-    # Proveedor de LLM
     provider: Literal["openai", "azure"] = "azure"
     
     # Configuración de OpenAI (original)
@@ -170,12 +200,15 @@ class SecuritySettings(BaseSettings):
 class Settings(BaseSettings):
     """Configuración principal que agrupa todas las demás"""
     
-    # 🔥 CAMBIO CRÍTICO: Inicializar sub-configuraciones correctamente
     def __init__(self, **kwargs):
+        # 🔥 VERIFICAR que .env se cargó antes de inicializar
+        if os.getenv('DB_NAME') != 'chatbot_db':
+            print(f"⚠️ ADVERTENCIA: DB_NAME = {os.getenv('DB_NAME')} (debería ser chatbot_db)")
+            print("💡 Revisa tu archivo .env")
+        
         super().__init__(**kwargs)
         
         # Inicializar cada sub-configuración independientemente
-        # para que lean sus propias variables de entorno
         self.database = DatabaseSettings()
         self.llm = LLMSettings()
         self.app = ApplicationSettings()
@@ -193,16 +226,21 @@ class Settings(BaseSettings):
     chainlit: Optional[ChainlitSettings] = None
     security: Optional[SecuritySettings] = None
     
+    # 🔥 CAMBIO: Configurar para que .env tenga prioridad
     model_config = ConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore"  # 🔥 IMPORTANTE: Ignorar variables extra aquí también
+        extra="ignore"
     )
     
     def validate_configuration(self) -> list[str]:
         """Validar toda la configuración y retornar errores"""
         errors = []
+        
+        # Validar que DB_NAME sea correcto
+        if self.database.name != 'chatbot_db':
+            errors.append(f"DB_NAME incorrecto: {self.database.name} (debería ser chatbot_db)")
         
         # Validar configuración de Azure
         try:
@@ -241,6 +279,8 @@ def reload_settings():
     """Recargar configuración (útil para tests o cambios en runtime)"""
     global _settings
     _settings = None
+    # Recargar .env también
+    load_env_with_override()
 
 def validate_environment() -> bool:
     """
@@ -261,3 +301,17 @@ def validate_environment() -> bool:
         return False
     
     return True
+
+# 🔥 FUNCIÓN DE DEBUG
+def debug_current_settings():
+    """Función de debug para ver configuración actual"""
+    print("🔍 DEBUG - Configuración Actual:")
+    print(f"   DB_NAME (OS): {os.getenv('DB_NAME')}")
+    
+    try:
+        settings = get_settings()
+        print(f"   DB_NAME (Settings): {settings.database.name}")
+        print(f"   DB_HOST: {settings.database.host}")
+        print(f"   DB_USER: {settings.database.user}")
+    except Exception as e:
+        print(f"   ❌ Error obteniendo settings: {e}")

@@ -13,7 +13,6 @@ async def debug_specific_user():
     
 
     print(db_config)
-    exit()
 
     try:
         # Conectar a la BD
