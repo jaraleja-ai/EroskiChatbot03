@@ -30,26 +30,51 @@ class UserRepository(BaseRepository):
         super().__init__(connection_manager)
         self.logger = logging.getLogger("UserRepository")
     
+# Corrección temporal para el método get_by_email en UserRepository
+
     async def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """
-        Obtener usuario por email usando la estructura real de BD.
-        
-        Args:
-            email: Email a buscar
-            
-        Returns:
-            Diccionario con datos del usuario o None si no existe
+        Obtener usuario por email con diagnóstico mejorado.
         """
         try:
-            # 🔥 CORRECCIÓN: Query adaptado a estructura real
+            self.logger.info(f"🔍 Buscando usuario: {email}")
+            
+            # 1. Intentar query completa primero
             query = """
                 SELECT id, nombre, apellido, email, numero_empleado, 
-                       rol, departamento, activo, created_at, updated_at
+                    rol, departamento, activo, created_at, updated_at
                 FROM usuarios 
                 WHERE LOWER(email) = LOWER($1) AND activo = true
             """
             
             row = await self.fetch_one(query, email)
+            
+            if row:
+                self.logger.info(f"✅ Usuario encontrado con query completa")
+                # ... resto del código ...
+            else:
+                self.logger.warning(f"❌ No encontrado con query completa, probando sin filtro activo...")
+                
+                # 2. Probar sin filtro activo
+                query_no_active = """
+                    SELECT id, nombre, apellido, email, numero_empleado, 
+                        rol, departamento, activo, created_at, updated_at
+                    FROM usuarios 
+                    WHERE LOWER(email) = LOWER($1)
+                """
+                
+                row = await self.fetch_one(query_no_active, email)
+                
+                if row:
+                    if not row["activo"]:
+                        self.logger.warning(f"⚠️ Usuario encontrado pero está INACTIVO: {email}")
+                        return None
+                    else:
+                        self.logger.info(f"✅ Usuario encontrado sin filtro activo")
+                        # ... resto del código ...
+                else:
+                    self.logger.warning(f"❌ Usuario definitivamente no existe: {email}")
+                    return None
             
             if row:
                 user_data = {
@@ -63,21 +88,19 @@ class UserRepository(BaseRepository):
                     "activo": row["activo"],
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
-                    # Campos derivados para compatibilidad
                     "nombre_completo": f"{row['nombre']} {row['apellido']}",
                     "estado": "activo" if row["activo"] else "inactivo"
                 }
                 
                 self.logger.info(f"✅ Usuario encontrado: {user_data['nombre_completo']} ({email})")
                 return user_data
-            else:
-                self.logger.info(f"❌ Usuario no encontrado: {email}")
-                return None
-                
+            
+            return None
+            
         except Exception as e:
             self.logger.error(f"❌ Error buscando usuario por email {email}: {e}")
             raise
-    
+
     async def get_by_numero_empleado(self, numero_empleado: str) -> Optional[Dict[str, Any]]:
         """
         Obtener usuario por número de empleado.
