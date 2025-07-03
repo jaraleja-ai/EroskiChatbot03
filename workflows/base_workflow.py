@@ -7,9 +7,9 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 import logging
-from nodes import escalar_supervisor
+from nodes import escalate_supervisor_node
 
-from models.state import GraphState
+from models.eroski_state import EroskiState
 from config.settings import get_settings
 
 class BaseWorkflow(ABC):

@@ -15,10 +15,10 @@ import logging
 from typing import Dict, Any, Optional
 from langgraph.graph.state import CompiledStateGraph
 
-from models.state import GraphState
+from models.state import EroskiState
 from config.settings import get_settings
 from datetime import datetime
-from workflow import get_workflow_manager, WorkflowType 
+from workflows import get_workflow_manager, WorkflowType 
 from langgraph.checkpoint.memory import MemorySaver
 logger = logging.getLogger("Graph")
 
@@ -254,7 +254,7 @@ class GraphBuilder:
 # Funciones de conveniencia para retrocompatibilidad
 # =====================================================
 
-def crear_estado_inicial() -> GraphState:
+def crear_estado_inicial() -> EroskiState:
     """
     Crear estado inicial para el grafo.
     Función de conveniencia para retrocompatibilidad.
@@ -265,7 +265,7 @@ def crear_estado_inicial() -> GraphState:
     from datetime import datetime
     import uuid
     
-    return GraphState(
+    return EroskiState(
         messages=[],
         intentos=0,
         intentos_incidencia=0,
@@ -363,7 +363,7 @@ __all__ = [
     "get_graph_metrics",
     
     # Tipos
-    "GraphState"
+    "EroskiState"
 ]
 
 # =====================================================

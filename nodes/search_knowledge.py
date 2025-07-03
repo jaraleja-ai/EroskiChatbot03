@@ -21,7 +21,7 @@ import re
 from models.eroski_state import EroskiState, SolutionType
 from nodes.base_node import BaseNode
 
-class SearchKnowledgeNode(BaseNode):
+class search_knowledge_node(BaseNode):
     """
     Nodo para buscar información en base de conocimiento.
     

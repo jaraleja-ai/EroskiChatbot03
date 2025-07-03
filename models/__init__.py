@@ -52,7 +52,7 @@ from .eroski_state import (
 # ========== MANTENER COMPATIBILIDAD CON CÓDIGO EXISTENTE ==========
 try:
     # Importar modelos existentes si están disponibles
-    from .state import GraphState
+    from .state import EroskiState
     from .user import (
         UsuarioBase, UsuarioCreate, UsuarioUpdate, UsuarioDB, 
         UsuarioExtracted, RolUsuario, EstadoUsuario
@@ -104,7 +104,7 @@ try:
         "should_escalate",
         
         # ========== MODELOS EXISTENTES (COMPATIBILIDAD) ==========
-        "GraphState",
+        "EroskiState",
         "UsuarioBase", "UsuarioCreate", "UsuarioUpdate", "UsuarioDB", 
         "UsuarioExtracted", "RolUsuario", "EstadoUsuario",
         "IncidenciaBase", "IncidenciaCreate", "IncidenciaUpdate", "IncidenciaDB",
@@ -154,5 +154,5 @@ except ImportError as e:
 
 # ========== ALIAS PARA COMPATIBILIDAD ==========
 
-# Si alguien importa GraphState, usar EroskiState
-GraphState = EroskiState
+# Si alguien importa EroskiState, usar EroskiState
+EroskiState = EroskiState

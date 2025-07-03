@@ -4,7 +4,7 @@ from langchain_core.messages import BaseMessage
 # Definición del tipo para la tupla de interrupción
 InterruptionTrip = Tuple[str, str, str]  # (origen, destino, sentido)
 
-class GraphState(TypedDict, total=False):
+class EroskiState(TypedDict, total=False):
     """
     🏗️ Estado del grafo híbrido - Versión corregida para evitar bucles
     
@@ -206,7 +206,7 @@ def create_return_trip(original_trip: InterruptionTrip) -> InterruptionTrip:
     return (destino, origen, "vuelta")
 
 
-def clear_interruption_state(state: GraphState) -> GraphState:
+def clear_interruption_state(state: EroskiState) -> EroskiState:
     """
     Limpia el estado de interrupción cuando se completa el ciclo.
     
@@ -214,7 +214,7 @@ def clear_interruption_state(state: GraphState) -> GraphState:
         state: Estado actual del grafo
         
     Returns:
-        GraphState: Estado actualizado sin información de interrupción
+        EroskiState: Estado actualizado sin información de interrupción
     """
     return {
         **state,
@@ -224,7 +224,7 @@ def clear_interruption_state(state: GraphState) -> GraphState:
     }
 
 
-def has_active_interruption(state: GraphState) -> bool:
+def has_active_interruption(state: EroskiState) -> bool:
     """
     Verifica si hay una interrupción activa en el estado.
     
@@ -240,7 +240,7 @@ def has_active_interruption(state: GraphState) -> bool:
     )
 
 
-def should_return_from_interruption(state: GraphState) -> bool:
+def should_return_from_interruption(state: EroskiState) -> bool:
     """
     Determina si se debe regresar de una interrupción.
     

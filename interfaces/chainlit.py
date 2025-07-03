@@ -13,6 +13,7 @@ from graph import build_graph
 from utils.crear_estado_inicial import crear_estado_inicial
 from utils.database import init_database, close_database
 
+
 class ChatbotManager:
     """
     Gestor del chatbot refactorizado con la nueva arquitectura.

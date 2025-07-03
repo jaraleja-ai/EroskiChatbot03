@@ -3,7 +3,7 @@
 # =====================================================
 from typing import Dict, Type, Union, List, Any, Optional, TYPE_CHECKING
 from enum import Enum
-from workflow import BaseWorkflow
+from workflows import BaseWorkflow
 from langgraph.graph.state import CompiledStateGraph
 import logging
 import traceback

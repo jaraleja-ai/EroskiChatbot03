@@ -219,7 +219,7 @@ async def run_comprehensive_tests(logger):
         from nodes.base_node import BaseNode
         from workflows.workflow_manager import get_workflow_manager
         from graph import build_default_graph
-        from models.state import GraphState
+        from models.state import EroskiState
         logger.info("✅ Importaciones OK")
     except ImportError as e:
         logger.error(f"❌ Error en importaciones: {e}")

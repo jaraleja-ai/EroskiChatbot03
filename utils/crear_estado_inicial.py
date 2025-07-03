@@ -16,7 +16,7 @@ from datetime import datetime
 import uuid
 import logging
 
-from models.state import GraphState
+from models.state import EroskiState
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 logger = logging.getLogger("EstadoInicial")
@@ -25,7 +25,7 @@ def crear_estado_inicial(
     sesion_id: Optional[str] = None,
     mensajes_iniciales: Optional[List[BaseMessage]] = None,
     contexto_adicional: Optional[Dict[str, Any]] = None
-) -> GraphState:
+) -> EroskiState:
     """
     Crear un estado inicial limpio con todos los campos inicializados.
     
@@ -35,7 +35,7 @@ def crear_estado_inicial(
         contexto_adicional: Contexto adicional para inicializar
         
     Returns:
-        GraphState: Estado inicial del grafo con valores por defecto
+        EroskiState: Estado inicial del grafo con valores por defecto
     """
     try:
         logger.debug("🔧 Creando estado inicial del grafo")
@@ -51,7 +51,7 @@ def crear_estado_inicial(
         messages = mensajes_iniciales or []
         
         # Crear estado base
-        estado = GraphState(
+        estado = EroskiState(
             # ===== MENSAJES =====
             messages=messages,
             
@@ -99,7 +99,7 @@ def crear_estado_desde_mensaje(
     mensaje_usuario: str,
     sesion_id: Optional[str] = None,
     contexto: Optional[Dict[str, Any]] = None
-) -> GraphState:
+) -> EroskiState:
     """
     Crear estado inicial a partir de un mensaje del usuario.
     
@@ -109,7 +109,7 @@ def crear_estado_desde_mensaje(
         contexto: Contexto adicional
         
     Returns:
-        GraphState inicializado con el mensaje del usuario
+        EroskiState inicializado con el mensaje del usuario
     """
     try:
         logger.debug(f"🗣️ Creando estado desde mensaje: {mensaje_usuario[:50]}...")
@@ -131,7 +131,7 @@ def crear_estado_desde_mensaje(
         logger.error(f"❌ Error creando estado desde mensaje: {e}")
         raise
 
-def reset_estado_usuario(estado_actual: GraphState) -> GraphState:
+def reset_estado_usuario(estado_actual: EroskiState) -> EroskiState:
     """
     Resetear solo los campos relacionados con el usuario, manteniendo mensajes.
     
@@ -139,7 +139,7 @@ def reset_estado_usuario(estado_actual: GraphState) -> GraphState:
         estado_actual: Estado actual del grafo
         
     Returns:
-        GraphState: Estado con campos de usuario reseteados
+        EroskiState: Estado con campos de usuario reseteados
     """
     try:
         logger.debug("🔄 Reseteando datos de usuario")
@@ -170,7 +170,7 @@ def crear_estado_para_tests(
     incluir_usuario_completo: bool = False,
     incluir_incidencia: bool = False,
     incluir_escalacion: bool = False
-) -> GraphState:
+) -> EroskiState:
     """
     Crear estado inicial para testing con datos predefinidos.
     
@@ -180,7 +180,7 @@ def crear_estado_para_tests(
         incluir_escalacion: Si marcar para escalación
         
     Returns:
-        GraphState configurado para tests
+        EroskiState configurado para tests
     """
     try:
         logger.debug("🧪 Creando estado para tests")
@@ -231,7 +231,7 @@ def crear_estado_para_tests(
         logger.error(f"❌ Error creando estado para tests: {e}")
         raise
 
-def validar_integridad_estado(estado: GraphState) -> List[str]:
+def validar_integridad_estado(estado: EroskiState) -> List[str]:
     """
     Validar la integridad del estado del grafo.
     
@@ -284,7 +284,7 @@ def validar_integridad_estado(estado: GraphState) -> List[str]:
     
     return errores
 
-def obtener_resumen_estado(estado: GraphState) -> Dict[str, Any]:
+def obtener_resumen_estado(estado: EroskiState) -> Dict[str, Any]:
     """
     Obtener resumen legible del estado actual.
     
@@ -331,7 +331,7 @@ def obtener_resumen_estado(estado: GraphState) -> Dict[str, Any]:
         logger.error(f"❌ Error obteniendo resumen de estado: {e}")
         return {"error": str(e)}
 
-def copiar_estado(estado_original: GraphState) -> GraphState:
+def copiar_estado(estado_original: EroskiState) -> EroskiState:
     """
     Crear una copia profunda del estado.
     
@@ -347,7 +347,7 @@ def copiar_estado(estado_original: GraphState) -> GraphState:
         logger.debug("📋 Copiando estado")
         estado_copia = copy.deepcopy(dict(estado_original))
         logger.debug("✅ Estado copiado exitosamente")
-        return GraphState(estado_copia)
+        return EroskiState(estado_copia)
         
     except Exception as e:
         logger.error(f"❌ Error copiando estado: {e}")
@@ -358,9 +358,9 @@ def copiar_estado(estado_original: GraphState) -> GraphState:
 # =====================================================
 
 def agregar_mensaje_al_estado(
-    estado: GraphState, 
+    estado: EroskiState, 
     mensaje: BaseMessage
-) -> GraphState:
+) -> EroskiState:
     """
     Agregar un mensaje al estado existente.
     
@@ -377,9 +377,9 @@ def agregar_mensaje_al_estado(
     estado_actualizado = dict(estado)
     estado_actualizado["messages"] = mensajes_actuales
     
-    return GraphState(estado_actualizado)
+    return EroskiState(estado_actualizado)
 
-def marcar_usuario_completo(estado: GraphState) -> GraphState:
+def marcar_usuario_completo(estado: EroskiState) -> EroskiState:
     """
     Marcar datos de usuario como completos en el estado.
     
@@ -396,7 +396,7 @@ def marcar_usuario_completo(estado: GraphState) -> GraphState:
         "datos_usuario_completos": True
     })
     
-    return GraphState(estado_actualizado)
+    return EroskiState(estado_actualizado)
 
 # =====================================================
 # Exportaciones del módulo
