@@ -1,0 +1,33 @@
+{
+  "incident_types": {
+    "tpv": {
+      "name": "TPV (Terminal Punto de Venta)",
+      "keywords": ["tpv", "caja", "terminal", "pago", "tarjeta"],
+      "urgency_level": 3,
+      "estimated_resolution_minutes": 20,
+      "requires_technical_support": true,
+      "escalation_contacts": ["soporte.tpv@eroski.es"]
+    },
+    "impresoras": {
+      "name": "Impresoras y Etiquetadoras",
+      "keywords": ["impresora", "ticket", "etiqueta", "papel"],
+      "urgency_level": 2,
+      "estimated_resolution_minutes": 15,
+      "requires_technical_support": false
+    },
+    "red": {
+      "name": "Problemas de Red",
+      "keywords": ["internet", "wifi", "conexion", "red"],
+      "urgency_level": 3,
+      "estimated_resolution_minutes": 25,
+      "requires_technical_support": true
+    },
+    "software": {
+      "name": "Software Corporativo",
+      "keywords": ["aplicacion", "programa", "sap", "sistema"],
+      "urgency_level": 3,
+      "estimated_resolution_minutes": 25,
+      "requires_technical_support": true
+    }
+  }
+}

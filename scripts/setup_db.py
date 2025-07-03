@@ -1,15 +1,8 @@
 # =====================================================
-# scripts/setup_db.py - Script para configurar la base de datos
+# scripts/setup_db.py - Script corregido para configurar la base de datos
 # =====================================================
 """
 Script para configurar completamente la base de datos del chatbot.
-
-Funcionalidades:
-- Crear base de datos si no existe
-- Crear todas las tablas necesarias
-- Insertar datos de prueba
-- Verificar conexión y configuración
-- Crear índices para optimización
 """
 
 import asyncio
@@ -66,18 +59,16 @@ class DatabaseSetup:
         """Crear base de datos si no existe"""
         logger.info(f"📋 Creando base de datos: {self.db_config.name}")
         
-        # Conectar a postgres para crear la BD
         try:
             conn = await asyncpg.connect(
                 host=self.db_config.host,
                 port=self.db_config.port,
                 user=self.db_config.user,
                 password=self.db_config.password,
-                database="postgres"  # Conectar a postgres por defecto
+                database="postgres"
             )
             
             try:
-                # Verificar si la BD existe
                 result = await conn.fetchval(
                     "SELECT 1 FROM pg_database WHERE datname = $1",
                     self.db_config.name
@@ -86,7 +77,6 @@ class DatabaseSetup:
                 if result:
                     logger.info(f"✅ Base de datos {self.db_config.name} ya existe")
                 else:
-                    # Crear base de datos
                     await conn.execute(f'CREATE DATABASE "{self.db_config.name}"')
                     logger.info(f"✅ Base de datos {self.db_config.name} creada")
                     
@@ -120,8 +110,8 @@ class DatabaseSetup:
     async def _enable_extensions(self, conn):
         """Habilitar extensiones de PostgreSQL"""
         extensions = [
-            "CREATE EXTENSION IF NOT EXISTS pg_trgm;",  # Para búsqueda de similitud
-            "CREATE EXTENSION IF NOT EXISTS unaccent;",  # Para búsqueda sin acentos
+            "CREATE EXTENSION IF NOT EXISTS pg_trgm;",
+            "CREATE EXTENSION IF NOT EXISTS unaccent;",
         ]
         
         for extension in extensions:
@@ -142,6 +132,7 @@ class DatabaseSetup:
             numero_empleado VARCHAR(50) UNIQUE NOT NULL,
             rol VARCHAR(20) DEFAULT 'empleado' CHECK (rol IN ('empleado', 'supervisor', 'administrador')),
             departamento VARCHAR(100),
+            tienda VARCHAR(100),
             estado VARCHAR(20) DEFAULT 'activo' CHECK (estado IN ('activo', 'inactivo', 'suspendido')),
             fecha_creacion TIMESTAMP DEFAULT NOW(),
             fecha_actualizacion TIMESTAMP DEFAULT NOW(),
@@ -175,16 +166,16 @@ class DatabaseSetup:
             tiempo_resolucion_minutos INTEGER,
             
             -- Campos adicionales para tracking
-            preguntas_realizadas TEXT[], -- Array de preguntas hechas
-            respuestas_usuario JSONB DEFAULT '{}', -- Respuestas del usuario
+            preguntas_realizadas TEXT[],
+            respuestas_usuario JSONB DEFAULT '{}',
             intentos_resolucion INTEGER DEFAULT 0,
-            escalado_a VARCHAR(100), -- A quién se escaló
+            escalado_a VARCHAR(100),
             notas_internas TEXT,
             
             -- Constraints
             CONSTRAINT incidencias_descripcion_valida CHECK (LENGTH(descripcion) >= 10),
             CONSTRAINT incidencias_ticket_valido CHECK (numero_ticket ~ '^INC-[0-9]{8}-[A-Z0-9]{8}$'),
-            CONSTRAINT incidencias_tiempo_resolucion_positivo CHECK (tiempo_resolucion_minutos > 0)
+            CONSTRAINT incidencias_tiempo_resolucion_positivo CHECK (tiempo_resolucion_minutos > 0 OR tiempo_resolucion_minutos IS NULL)
         );
         """
         
@@ -192,7 +183,7 @@ class DatabaseSetup:
         logger.info("✅ Tabla 'incidencias' creada")
     
     async def _create_audit_table(self, conn):
-        """Crear tabla de auditoría"""
+        """Crear tabla de auditoría - CORREGIDA"""
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS auditoria (
             id SERIAL PRIMARY KEY,
@@ -202,11 +193,7 @@ class DatabaseSetup:
             datos_anteriores JSONB,
             datos_nuevos JSONB,
             usuario_sistema VARCHAR(100),
-            timestamp_accion TIMESTAMP DEFAULT NOW(),
-            
-            -- Índice para búsquedas frecuentes
-            INDEX idx_auditoria_tabla_registro (tabla_afectada, registro_id),
-            INDEX idx_auditoria_timestamp (timestamp_accion)
+            timestamp_accion TIMESTAMP DEFAULT NOW()
         );
         """
         
@@ -214,7 +201,7 @@ class DatabaseSetup:
         logger.info("✅ Tabla 'auditoria' creada")
     
     async def create_indexes(self):
-        """Crear índices para optimización"""
+        """Crear índices para optimización - CORREGIDO"""
         logger.info("📋 Creando índices de optimización...")
         
         conn = await asyncpg.connect(self.db_config.connection_string)
@@ -227,7 +214,7 @@ class DatabaseSetup:
                 "CREATE INDEX IF NOT EXISTS idx_usuarios_estado ON usuarios(estado);",
                 "CREATE INDEX IF NOT EXISTS idx_usuarios_nombre_apellido ON usuarios(nombre, apellido);",
                 
-                # Índice de similitud para búsqueda de nombres
+                # Índice de similitud para búsqueda de nombres (requiere pg_trgm)
                 "CREATE INDEX IF NOT EXISTS idx_usuarios_nombre_similitud ON usuarios USING gin ((nombre || ' ' || apellido) gin_trgm_ops);",
                 
                 # Índices para incidencias
@@ -239,127 +226,120 @@ class DatabaseSetup:
                 "CREATE INDEX IF NOT EXISTS idx_incidencias_fecha_creacion ON incidencias(fecha_creacion);",
                 "CREATE INDEX IF NOT EXISTS idx_incidencias_estado_fecha ON incidencias(estado, fecha_creacion);",
                 
-                # Índice para búsqueda de texto en descripción
-                "CREATE INDEX IF NOT EXISTS idx_incidencias_descripcion_busqueda ON incidencias USING gin (to_tsvector('spanish', descripcion));",
+                # Índices para auditoría - CORREGIDOS
+                "CREATE INDEX IF NOT EXISTS idx_auditoria_tabla_registro ON auditoria(tabla_afectada, registro_id);",
+                "CREATE INDEX IF NOT EXISTS idx_auditoria_timestamp ON auditoria(timestamp_accion);",
+                "CREATE INDEX IF NOT EXISTS idx_auditoria_accion ON auditoria(accion);"
             ]
             
             for index_sql in indexes:
                 try:
                     await conn.execute(index_sql)
-                    logger.debug(f"✅ Índice creado: {index_sql[:50]}...")
+                    logger.debug(f"✅ Índice creado: {index_sql}")
                 except Exception as e:
-                    logger.warning(f"⚠️ Error creando índice: {e}")
+                    logger.warning(f"⚠️ No se pudo crear índice: {e}")
             
-            logger.info("✅ Índices de optimización creados")
+            logger.info("✅ Índices creados correctamente")
             
         finally:
             await conn.close()
     
     async def insert_sample_data(self):
         """Insertar datos de prueba"""
-        logger.info("📋 Insertando datos de prueba...")
+        logger.info("📝 Insertando datos de prueba...")
         
         conn = await asyncpg.connect(self.db_config.connection_string)
         
         try:
             # Verificar si ya hay datos
-            user_count = await conn.fetchval("SELECT COUNT(*) FROM usuarios")
-            
-            if user_count > 0:
-                logger.info(f"✅ Ya existen {user_count} usuarios, omitiendo datos de prueba")
+            count = await conn.fetchval("SELECT COUNT(*) FROM usuarios")
+            if count > 0:
+                logger.info("✅ Ya existen datos de prueba")
                 return
             
-            # Insertar usuarios de prueba
             await self._insert_sample_users(conn)
-            
-            # Insertar incidencias de prueba
             await self._insert_sample_incidencias(conn)
-            
-            logger.info("✅ Datos de prueba insertados")
             
         finally:
             await conn.close()
     
     async def _insert_sample_users(self, conn):
         """Insertar usuarios de prueba"""
-        users_data = [
+        usuarios_data = [
             {
-                "nombre": "Juan",
-                "apellido": "Pérez García", 
-                "email": "juan.perez@empresa.com",
+                "nombre": "Juan Carlos",
+                "apellido": "Pérez García",
+                "email": "juan.perez@eroski.es",
                 "numero_empleado": "EMP001",
                 "rol": "empleado",
-                "departamento": "Desarrollo"
+                "departamento": "Desarrollo",
+                "tienda": "Oficinas Centrales"
             },
             {
                 "nombre": "María",
                 "apellido": "González López",
-                "email": "maria.gonzalez@empresa.com", 
+                "email": "maria.gonzalez@eroski.es",
                 "numero_empleado": "EMP002",
-                "rol": "empleado",
-                "departamento": "Marketing"
-            },
-            {
-                "nombre": "Carlos",
-                "apellido": "Rodríguez Sánchez",
-                "email": "carlos.rodriguez@empresa.com",
-                "numero_empleado": "SUP001", 
                 "rol": "supervisor",
-                "departamento": "IT"
+                "departamento": "IT",
+                "tienda": "Oficinas Centrales"
             },
             {
-                "nombre": "Ana",
-                "apellido": "Martínez Torres",
-                "email": "ana.martinez@empresa.com",
+                "nombre": "Mikel",
+                "apellido": "Etxebarria",
+                "email": "mikel.etxebarria@eroski.es",
                 "numero_empleado": "EMP003",
-                "rol": "empleado", 
-                "departamento": "Ventas"
+                "rol": "empleado",
+                "departamento": "Ventas",
+                "tienda": "Bilbao Centro"
             },
             {
-                "nombre": "Luis",
-                "apellido": "Fernández Ruiz",
-                "email": "luis.fernandez@empresa.com",
+                "nombre": "Admin",
+                "apellido": "Test",
+                "email": "admin.test@eroski.es",
                 "numero_empleado": "ADM001",
                 "rol": "administrador",
-                "departamento": "IT"
+                "departamento": "IT",
+                "tienda": "Testing"
             }
         ]
         
-        for user_data in users_data:
+        for user_data in usuarios_data:
             await conn.execute("""
-                INSERT INTO usuarios (nombre, apellido, email, numero_empleado, rol, departamento)
-                VALUES ($1, $2, $3, $4, $5, $6)
-            """, 
+                INSERT INTO usuarios (nombre, apellido, email, numero_empleado, rol, departamento, tienda)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """,
             user_data["nombre"],
-            user_data["apellido"], 
+            user_data["apellido"],
             user_data["email"],
             user_data["numero_empleado"],
             user_data["rol"],
-            user_data["departamento"]
+            user_data["departamento"],
+            user_data["tienda"]
             )
         
-        logger.info(f"✅ {len(users_data)} usuarios de prueba insertados")
+        logger.info(f"✅ {len(usuarios_data)} usuarios de prueba insertados")
     
     async def _insert_sample_incidencias(self, conn):
         """Insertar incidencias de prueba"""
-        # Obtener IDs de usuarios
-        users = await conn.fetch("SELECT id, numero_empleado FROM usuarios LIMIT 3")
+        # Obtener usuarios para asignar incidencias
+        users = await conn.fetch("SELECT id FROM usuarios LIMIT 3")
         
         incidencias_data = [
             {
                 "usuario_id": users[0]["id"],
                 "numero_ticket": "INC-20241201-ABC12345",
                 "tipo": "hardware",
-                "descripcion": "Mi computadora se está ejecutando muy lenta desde esta mañana",
-                "prioridad": "media",
+                "descripcion": "Mi ordenador no enciende después del fin de semana",
+                "prioridad": "alta",
                 "estado": "abierta"
             },
             {
-                "usuario_id": users[1]["id"], 
+                "usuario_id": users[1]["id"] if len(users) > 1 else users[0]["id"],
                 "numero_ticket": "INC-20241201-DEF67890",
                 "tipo": "software",
-                "descripcion": "No puedo abrir Microsoft Excel, aparece un error",
-                "prioridad": "alta",
+                "descripcion": "No puedo acceder al sistema de gestión de inventario",
+                "prioridad": "media",
                 "estado": "en_progreso"
             },
             {
@@ -367,7 +347,7 @@ class DatabaseSetup:
                 "numero_ticket": "INC-20241130-GHI13579",
                 "tipo": "red",
                 "descripcion": "Problemas de conexión a internet en mi área",
-                "prioridad": "media", 
+                "prioridad": "media",
                 "estado": "resuelta",
                 "fecha_resolucion": datetime.now(),
                 "tiempo_resolucion_minutos": 45
@@ -432,7 +412,7 @@ class DatabaseSetup:
             
             logger.info(f"📊 Datos verificados: {user_count} usuarios, {inc_count} incidencias")
             
-            # Test de consulta con similitud
+            # Test de consulta con similitud (opcional)
             try:
                 similar_users = await conn.fetch("""
                     SELECT nombre, apellido, similarity(nombre || ' ' || apellido, 'Juan Perez') as sim
