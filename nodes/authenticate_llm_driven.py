@@ -639,7 +639,7 @@ async def llm_driven_authenticate_node(state: EroskiState) -> Command:
     Returns:
         Instancia configurada del nodo
     """
-    self.logger.info("🌄JGL Creating instance of LLMDrivenAuthenticateNode")
+    
     node = LLMDrivenAuthenticateNode()
     return await node.execute(state)
 

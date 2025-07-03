@@ -89,7 +89,7 @@ class EroskiChatInterface:
             # Ejecutar grafo
             self.logger.debug("🔄 Ejecutando workflow...")
             result = await self.graph.ainvoke(input_data, config)
-            
+            self.logger.info(f"🌄JGL eroski chat interface{result}")
             # Procesar resultado
             response_data = self._process_workflow_result(result, session_id)
             
