@@ -188,9 +188,13 @@ class EroskiEmployeeSeederV3:
             
             try:
                 # Limpiar datos existentes de Eroski
-                deleted = await conn.fetchval("DELETE FROM usuarios WHERE email LIKE '%@eroski.es' RETURNING COUNT(*)")
-                if deleted and deleted > 0:
-                    logger.info(f"🧹 {deleted} registros previos de Eroski eliminados")
+                # Primero contar cuántos hay
+                count_existing = await conn.fetchval("SELECT COUNT(*) FROM usuarios WHERE email LIKE '%@eroski.es'")
+                
+                # Luego eliminar
+                if count_existing > 0:
+                    await conn.execute("DELETE FROM usuarios WHERE email LIKE '%@eroski.es'")
+                    logger.info(f"🧹 {count_existing} registros previos de Eroski eliminados")
                 
                 # Obtener estructura actual
                 usuarios_structure = await self.get_table_structure("usuarios")
@@ -243,10 +247,14 @@ class EroskiEmployeeSeederV3:
                 "empleado": "empleado"
             }
         
+        # Generar números de empleado cortos (máximo 4 caracteres)
+        # Usar formato: E001, E002, etc. para la tienda
+        tienda_num = tienda['codigo'][-1]  # Último dígito del código (1, 2, 3)
+        
         empleados_base = [
             # Gerencia
             {
-                "numero_empleado": f"{tienda['codigo']}-001",
+                "numero_empleado": f"G{tienda_num}01",  # G101, G201, G301
                 "nombre": "María Carmen",
                 "apellido": "González Ruiz",
                 "email": f"maria.gonzalez.{tienda['codigo'].lower()}@eroski.es",
@@ -255,7 +263,7 @@ class EroskiEmployeeSeederV3:
             },
             # Supervisores
             {
-                "numero_empleado": f"{tienda['codigo']}-002",
+                "numero_empleado": f"S{tienda_num}01",  # S101, S201, S301
                 "nombre": "Iker",
                 "apellido": "Etxeberria Aguirre",
                 "email": f"iker.etxeberria.{tienda['codigo'].lower()}@eroski.es",
@@ -264,7 +272,7 @@ class EroskiEmployeeSeederV3:
             },
             # Empleados de sección
             {
-                "numero_empleado": f"{tienda['codigo']}-101",
+                "numero_empleado": f"E{tienda_num}01",  # E101, E201, E301
                 "nombre": "Ainhoa",
                 "apellido": "Martínez López",
                 "email": f"ainhoa.martinez.{tienda['codigo'].lower()}@eroski.es",
@@ -272,7 +280,7 @@ class EroskiEmployeeSeederV3:
                 "departamento": "Frutería"
             },
             {
-                "numero_empleado": f"{tienda['codigo']}-102",
+                "numero_empleado": f"E{tienda_num}02",  # E102, E202, E302
                 "nombre": "Mikel",
                 "apellido": "Urrutia Fernández",
                 "email": f"mikel.urrutia.{tienda['codigo'].lower()}@eroski.es",
@@ -281,7 +289,7 @@ class EroskiEmployeeSeederV3:
             },
             # Empleados de caja
             {
-                "numero_empleado": f"{tienda['codigo']}-201",
+                "numero_empleado": f"E{tienda_num}03",  # E103, E203, E303
                 "nombre": "Leire",
                 "apellido": "Saenz de Urturi",
                 "email": f"leire.saenz.{tienda['codigo'].lower()}@eroski.es",
@@ -289,7 +297,7 @@ class EroskiEmployeeSeederV3:
                 "departamento": "Caja"
             },
             {
-                "numero_empleado": f"{tienda['codigo']}-202",
+                "numero_empleado": f"E{tienda_num}04",  # E104, E204, E304
                 "nombre": "Jon",
                 "apellido": "Bilbao Echevarría",
                 "email": f"jon.bilbao.{tienda['codigo'].lower()}@eroski.es",
