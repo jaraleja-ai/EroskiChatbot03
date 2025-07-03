@@ -247,9 +247,9 @@ class EroskiFinalWorkflow(BaseWorkflow):
             Siguiente acción a tomar
         """
         self.logger.info(f"🌄JGL Entrada en el router de autenticación")
-        self.logger.info(f"🌄JGL employee_email: {state.get("employee_email")}")
-        self.logger.info(f"🌄JGL store_name: {state.get("store_name")}")
-        self.logger.info(f"🌄JGL authenticated: {state.get("authenticated")}")
+        self.logger.info(f"🌄JGL employee_email: {state.get('employee_email')}")
+        self.logger.info(f"🌄JGL store_name: {state.get('store_name')}")
+        self.logger.info(f"🌄JGL authenticated: {state.get('authenticated')}")
 
         
         # Si ya está autenticado, continuar

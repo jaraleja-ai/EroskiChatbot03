@@ -1,15 +1,14 @@
 # =====================================================
-# nodes/classify.py - Nodo de Clasificación de Consultas
+# nodes/classify_enhanced.py - Nodo de Clasificación Mejorado
 # =====================================================
 """
-Nodo para clasificar el tipo de consulta del empleado.
+Nodo para clasificar consultas con lógica de primera visita y análisis LLM.
 
-RESPONSABILIDADES:
-- Analizar el mensaje del usuario para determinar tipo de consulta
-- Clasificar como: INCIDENCIA, CONSULTA, URGENTE, NO_CLARO
-- Extraer información técnica relevante
-- Asignar nivel de urgencia
-- Determinar si requiere escalación inmediata
+FUNCIONALIDAD:
+1. Primera visita: Analiza histórico de mensajes con LLM
+2. Usa archivo de tipologías de incidencias
+3. Si encuentra información de incidencia -> siguiente nodo
+4. Si no encuentra información -> pide explicación cordial
 """
 
 from typing import Dict, Any, Optional, List
@@ -17,347 +16,483 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
 from datetime import datetime
 import logging
-import re
 
-from models.eroski_state import EroskiState, ConsultaType, UrgencyLevel
+from models.eroski_state import EroskiState, ConsultaType
 from nodes.base_node import BaseNode
 from config.incident_config import get_incident_config
+from utils.llm import get_llm
+from utils.node_visit_manager import NodeVisitManager
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
+from pydantic import BaseModel, Field
 
-class ClassifyQueryNode(BaseNode):
+class IncidentAnalysisResult(BaseModel):
+    """Resultado del análisis de incidencia por LLM"""
+    incident_detected: bool = Field(description="Si se detectó información de incidencia")
+    incident_type: Optional[str] = Field(description="Tipo de incidencia identificado")
+    incident_description: Optional[str] = Field(description="Descripción extraída de la incidencia")
+    confidence: float = Field(description="Confianza del análisis (0.0 a 1.0)")
+    reasoning: str = Field(description="Razonamiento del análisis")
+    missing_info: List[str] = Field(description="Información que falta para completar")
+
+class ClassifyQueryNodeEnhanced(BaseNode):
     """
-    Nodo para clasificar consultas de empleados de Eroski.
-    
-    CARACTERÍSTICAS:
-    - Clasificación inteligente usando keywords
-    - Detección de urgencia automática
-    - Integración con configuración de tipos de incidencia
-    - Extracción de información técnica
+    Nodo de clasificación mejorado con análisis LLM y primera visita.
     """
     
     def __init__(self):
         super().__init__("ClassifyQuery")
         self.incident_config = get_incident_config()
+        self.llm = get_llm()
         
-        # Palabras clave para clasificación
-        self.urgency_keywords = [
-            "urgente", "crítico", "emergencia", "parado", "bloqueado",
-            "no funciona", "roto", "error crítico", "inmediato", "ya"
-        ]
+        # Parser para respuesta del LLM
+        self.parser = JsonOutputParser(pydantic_object=IncidentAnalysisResult)
         
-        self.consultation_keywords = [
-            "consulta", "pregunta", "información", "cómo", "dónde", "cuándo",
-            "estado", "revisar", "verificar", "confirmar", "saber"
-        ]
-        
-        self.incident_keywords = [
-            "problema", "error", "fallo", "incidencia", "no funciona",
-            "roto", "avería", "defecto", "bug", "mal"
-        ]
-        
+        # Prompt para análisis de incidencias
+        self.analysis_prompt = PromptTemplate(
+            template="""Eres un experto en análisis de incidencias técnicas de Eroski.
+
+Tu tarea es analizar el historial de mensajes del usuario para identificar si hay información sobre una incidencia técnica.
+
+TIPOS DE INCIDENCIAS DISPONIBLES:
+{incident_types}
+
+HISTORIAL DE MENSAJES DEL USUARIO:
+{message_history}
+
+INSTRUCCIONES:
+1. Analiza TODOS los mensajes del usuario (no solo el último)
+2. Busca información sobre problemas técnicos, equipos, errores, etc.
+3. Si encuentras información de incidencia, identifica el tipo más probable
+4. Evalúa qué información falta para resolver el problema
+5. Asigna una confianza alta (>0.7) solo si tienes información clara
+
+CRITERIOS PARA DETECTAR INCIDENCIA:
+- Menciona problemas con equipos (TPV, impresoras, tablets, etc.)
+- Describe errores o fallos
+- Indica que algo "no funciona"
+- Menciona códigos de error
+- Habla de interrupciones en el trabajo
+
+{format_instructions}
+""",
+            input_variables=["incident_types", "message_history"],
+            partial_variables={"format_instructions": self.parser.get_format_instructions()}
+        )
+    
     def get_required_fields(self) -> List[str]:
         return ["messages", "authenticated"]
     
     def get_actor_description(self) -> str:
-        return "Clasifico consultas de empleados para determinar el tipo de atención requerida"
+        return "Clasifico consultas y analizo mensajes para identificar incidencias técnicas"
     
     async def execute(self, state: EroskiState) -> Command:
         """
-        Ejecutar clasificación de la consulta.
-        
-        Args:
-            state: Estado actual del workflow
-            
-        Returns:
-            Command con la clasificación realizada
+        Ejecutar clasificación con lógica de primera visita.
         """
-        print("🎗️"*50)
-        print(f"entra en el nodo: {self.__class__.__name__}")
+        print("🎗️" * 50)
+        print(f"Entra en el nodo: {self.__class__.__name__}")
+        
         try:
-            # Obtener último mensaje del usuario
-            user_message = self.get_last_user_message(state)
-            if not user_message:
-                return self._request_clarification(state, "No he recibido ningún mensaje para clasificar")
+            # Verificar si es primera visita
+            is_first_visit = NodeVisitManager.is_first_visit(state, self.name)
             
-            # Realizar clasificación
-            classification_result = self._classify_message(user_message)
-            
-            # Determinar siguiente acción
-            if classification_result["confidence"] < 0.5:
-                return self._request_clarification(state, 
-                    "No estoy seguro del tipo de consulta. ¿Podrías ser más específico?")
-            
-            # Actualizar estado con clasificación
-            return self._update_state_with_classification(state, classification_result)
-            
+            if is_first_visit:
+                return await self._handle_first_visit(state)
+            else:
+                return await self._handle_revisit(state)
+                
         except Exception as e:
             self.logger.error(f"❌ Error en clasificación: {e}")
-            return self._escalate_error(state, str(e))
+            return self._handle_error(state, str(e))
     
-    def _classify_message(self, message: str) -> Dict[str, Any]:
+    async def _handle_first_visit(self, state: EroskiState) -> Command:
         """
-        Clasificar mensaje del usuario.
-        
-        Args:
-            message: Mensaje a clasificar
-            
-        Returns:
-            Diccionario con resultado de clasificación
+        Manejar primera visita - Analizar histórico con LLM.
         """
-        message_lower = message.lower()
+        self.logger.info("🆕 Primera visita a ClassifyQuery - Analizando histórico con LLM")
         
-        # Búsqueda en configuración de incidencias
-        incident_matches = self.incident_config.search_by_keywords(message, limit=3)
+        # Extraer mensajes del usuario
+        user_messages = self._extract_user_messages(state)
         
-        # Calcular puntuaciones
-        urgency_score = self._calculate_keyword_score(message_lower, self.urgency_keywords)
-        consultation_score = self._calculate_keyword_score(message_lower, self.consultation_keywords)
-        incident_score = self._calculate_keyword_score(message_lower, self.incident_keywords)
+        if not user_messages:
+            return self._request_initial_explanation(state)
         
-        # Bonus por coincidencias en configuración
-        if incident_matches:
-            incident_score += incident_matches[0]["score"] / 10
+        # Analizar con LLM
+        analysis_result = await self._analyze_messages_with_llm(user_messages)
         
-        # Determinar clasificación
-        query_type = None
-        confidence = 0.0
-        urgency_level = UrgencyLevel.MEDIA
+        # Actualizar execution_path
+        update_data = NodeVisitManager.update_execution_path(state, self.name)
         
-        if urgency_score > 0.3:
-            query_type = ConsultaType.URGENTE
-            confidence = urgency_score
-            urgency_level = UrgencyLevel.ALTA
-        elif incident_score > consultation_score and incident_score > 0.2:
-            query_type = ConsultaType.INCIDENCIA
-            confidence = incident_score
-            urgency_level = self._determine_urgency_level(message_lower, incident_matches)
-        elif consultation_score > 0.2:
-            query_type = ConsultaType.CONSULTA
-            confidence = consultation_score
-            urgency_level = UrgencyLevel.BAJA
+        if analysis_result.incident_detected and analysis_result.confidence > 0.6:
+            # Se detectó incidencia - continuar al siguiente nodo
+            return self._proceed_to_collect_details(state, analysis_result, update_data)
         else:
-            query_type = ConsultaType.NO_CLARO
-            confidence = 0.1
+            # No se detectó incidencia clara - pedir explicación
+            return self._request_incident_explanation(state, analysis_result, update_data)
+    
+    async def _handle_revisit(self, state: EroskiState) -> Command:
+        """
+        Manejar revisita - El usuario ha proporcionado más información.
+        """
+        visit_count = NodeVisitManager.get_visit_count(state, self.name)
+        self.logger.info(f"🔄 Revisita #{visit_count} a ClassifyQuery")
         
-        # Extraer información técnica
-        technical_info = self._extract_technical_info(message)
+        # Obtener último mensaje del usuario
+        last_message = self.get_last_user_message(state)
         
-        return {
-            "query_type": query_type,
-            "confidence": confidence,
-            "urgency_level": urgency_level,
-            "technical_info": technical_info,
-            "incident_matches": incident_matches[:2],  # Solo top 2
-            "classification_reason": self._get_classification_reason(
-                query_type, urgency_score, consultation_score, incident_score
+        if not last_message:
+            return self._handle_no_response(state)
+        
+        # Analizar el nuevo mensaje
+        analysis_result = await self._analyze_messages_with_llm([last_message])
+        
+        # Actualizar execution_path
+        update_data = NodeVisitManager.update_execution_path(state, self.name)
+        
+        if analysis_result.incident_detected and analysis_result.confidence > 0.5:
+            # Ahora sí tenemos información de incidencia
+            return self._proceed_to_collect_details(state, analysis_result, update_data)
+        else:
+            # Aún no está claro - intentar clarificar o escalar
+            if visit_count >= 3:
+                return self._escalate_classification_failure(state, update_data)
+            else:
+                return self._request_more_specific_info(state, update_data)
+    
+    def _extract_user_messages(self, state: EroskiState) -> List[str]:
+        """
+        Extraer solo los mensajes del usuario del historial.
+        """
+        messages = state.get("messages", [])
+        user_messages = []
+        
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                user_messages.append(msg.content)
+        
+        return user_messages
+    
+    async def _analyze_messages_with_llm(self, user_messages: List[str]) -> IncidentAnalysisResult:
+        """
+        Analizar mensajes del usuario con LLM para detectar incidencias.
+        """
+        try:
+            # Preparar tipos de incidencias disponibles
+            incident_types_text = self._format_incident_types()
+            
+            # Preparar historial de mensajes
+            message_history = "\n".join([f"- {msg}" for msg in user_messages])
+            
+            # Crear prompt
+            formatted_prompt = self.analysis_prompt.format(
+                incident_types=incident_types_text,
+                message_history=message_history
             )
-        }
-    
-    def _calculate_keyword_score(self, text: str, keywords: List[str]) -> float:
-        """Calcular puntuación basada en palabras clave"""
-        matches = sum(1 for keyword in keywords if keyword in text)
-        return min(matches / len(keywords), 1.0)
-    
-    def _determine_urgency_level(self, message: str, incident_matches: List[Dict]) -> UrgencyLevel:
-        """Determinar nivel de urgencia basado en contexto"""
-        # Palabras de urgencia crítica
-        critical_keywords = ["parado", "bloqueado", "no funciona", "roto", "emergencia"]
-        if any(keyword in message for keyword in critical_keywords):
-            return UrgencyLevel.CRITICA
-        
-        # Basado en tipo de incidencia
-        if incident_matches and incident_matches[0]["incident_type"].urgency_level >= 3:
-            return UrgencyLevel.ALTA
-        
-        # Hora del día (horario comercial = más urgente)
-        current_hour = datetime.now().hour
-        if 8 <= current_hour <= 20:
-            return UrgencyLevel.MEDIA
-        
-        return UrgencyLevel.BAJA
-    
-    def _extract_technical_info(self, message: str) -> Dict[str, Any]:
-        """Extraer información técnica del mensaje"""
-        technical_info = {}
-        
-        # Códigos de error
-        error_codes = re.findall(r'error\s*[\:\-]?\s*(\w+\d+|\d+)', message.lower())
-        if error_codes:
-            technical_info["error_codes"] = error_codes
-        
-        # Números de serie
-        serial_numbers = re.findall(r'serie\s*[\:\-]?\s*([A-Z0-9]{6,})', message.upper())
-        if serial_numbers:
-            technical_info["serial_numbers"] = serial_numbers
-        
-        # Equipos mencionados
-        equipment_keywords = ["tpv", "caja", "terminal", "impresora", "scanner", "ordenador"]
-        equipment = [eq for eq in equipment_keywords if eq in message.lower()]
-        if equipment:
-            technical_info["equipment"] = equipment
-        
-        # Ubicaciones en tienda
-        location_keywords = ["caja", "almacén", "oficina", "entrada", "salida", "parking"]
-        locations = [loc for loc in location_keywords if loc in message.lower()]
-        if locations:
-            technical_info["locations"] = locations
-        
-        return technical_info
-    
-    def _get_classification_reason(self, query_type: ConsultaType, 
-                                 urgency_score: float, consultation_score: float, 
-                                 incident_score: float) -> str:
-        """Obtener razón de la clasificación"""
-        if query_type == ConsultaType.URGENTE:
-            return f"Detectada urgencia (puntuación: {urgency_score:.2f})"
-        elif query_type == ConsultaType.INCIDENCIA:
-            return f"Detectada incidencia (puntuación: {incident_score:.2f})"
-        elif query_type == ConsultaType.CONSULTA:
-            return f"Detectada consulta (puntuación: {consultation_score:.2f})"
-        else:
-            return "Clasificación no clara, requiere clarificación"
-    
-    def _update_state_with_classification(self, state: EroskiState, 
-                                        classification: Dict[str, Any]) -> Command:
-        """Actualizar estado con resultado de clasificación"""
-        
-        # Mensaje de confirmación al usuario
-        confirmation_message = self._build_confirmation_message(classification)
-        
-        return Command(update={
-            "query_type": classification["query_type"],
-            "confidence_score": classification["confidence"],
-            "urgency_level": classification["urgency_level"],
-            "technical_info": classification["technical_info"],
-            "incident_matches": classification["incident_matches"],
-            "classification_reason": classification["classification_reason"],
-            "messages": state.get("messages", []) + [AIMessage(content=confirmation_message)],
-            "current_node": "classify",
-            "last_activity": datetime.now(),
-            "awaiting_user_input": False
-        })
-    
-    def _build_confirmation_message(self, classification: Dict[str, Any]) -> str:
-        """Construir mensaje de confirmación para el usuario"""
-        query_type = classification["query_type"]
-        
-        if query_type == ConsultaType.URGENTE:
-            return """🚨 **CONSULTA URGENTE DETECTADA**
-
-He identificado que tu consulta es **urgente** y requiere atención inmediata.
-
-➡️ **Siguiente paso:** Te conectaré directamente con un supervisor para atención prioritaria.
-
-⏰ **Tiempo estimado:** 2-5 minutos"""
-        
-        elif query_type == ConsultaType.INCIDENCIA:
-            incident_info = ""
-            if classification["incident_matches"]:
-                top_match = classification["incident_matches"][0]
-                incident_info = f"\n📋 **Tipo detectado:** {top_match['incident_type'].name}"
             
-            return f"""🔧 **INCIDENCIA TÉCNICA DETECTADA**
-
-He identificado que reportas una **incidencia técnica** que requiere resolución.{incident_info}
-
-➡️ **Siguiente paso:** Voy a recopilar los detalles necesarios para buscar una solución.
-
-⏰ **Tiempo estimado:** 5-15 minutos"""
-        
-        elif query_type == ConsultaType.CONSULTA:
-            return """❓ **CONSULTA GENERAL DETECTADA**
-
-He identificado que tienes una **consulta general** o necesitas información.
-
-➡️ **Siguiente paso:** Te ayudaré a encontrar la información que necesitas.
-
-⏰ **Tiempo estimado:** 2-5 minutos"""
-        
-        else:
-            return """❔ **NECESITO MÁS INFORMACIÓN**
-
-No he podido identificar claramente el tipo de consulta.
-
-➡️ **Siguiente paso:** Te haré algunas preguntas para entender mejor cómo ayudarte."""
+            # Invocar LLM
+            self.logger.debug("🤖 Invocando LLM para análisis de incidencias")
+            response = await self.llm.ainvoke(formatted_prompt)
+            
+            # Parsear respuesta
+            result = self.parser.parse(response.content)
+            
+            self.logger.info(f"🔍 Análisis LLM - Incidencia detectada: {result.incident_detected}, Confianza: {result.confidence}")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error en análisis LLM: {e}")
+            # Retornar resultado por defecto en caso de error
+            return IncidentAnalysisResult(
+                incident_detected=False,
+                confidence=0.0,
+                reasoning=f"Error en análisis: {str(e)}",
+                missing_info=["Información técnica del problema"]
+            )
     
-    def _request_clarification(self, state: EroskiState, reason: str) -> Command:
-        """Solicitar clarificación al usuario"""
-        attempts = state.get("attempts", 0)
+    def _format_incident_types(self) -> str:
+        """
+        Formatear tipos de incidencias para el prompt del LLM.
+        """
+        try:
+            all_types = self.incident_config.get_all_incident_types()
+            
+            formatted_types = []
+            for incident_id, incident_type in all_types.items():
+                formatted_types.append(
+                    f"- {incident_type.name}: {incident_type.description}\n"
+                    f"  Palabras clave: {', '.join(incident_type.keywords)}"
+                )
+            
+            return "\n".join(formatted_types)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error formateando tipos de incidencia: {e}")
+            return "No se pudieron cargar los tipos de incidencia"
+    
+    def _request_initial_explanation(self, state: EroskiState) -> Command:
+        """
+        Solicitar explicación inicial cuando no hay mensajes del usuario.
+        """
+        message = """👋 ¡Hola! Soy tu asistente para incidencias técnicas de Eroski.
+
+🔧 **¿Qué problema técnico estás experimentando?**
+
+Puedes contarme sobre:
+• 💻 **Problemas con equipos** (TPV, impresoras, tablets, ordenadores)
+• 🌐 **Problemas de red o internet**
+• 📱 **Aplicaciones que no funcionan**
+• ⚡ **Errores o fallos en general**
+
+**Por favor, describe tu problema con el máximo detalle posible.**"""
         
-        if attempts >= 2:
-            return self._escalate_classification_failure(state, reason)
-        
-        clarification_message = f"""❔ **Necesito que me ayudes a entender tu consulta**
-
-{reason}
-
-**Por favor, cuéntame:**
-• ¿Qué tipo de problema o consulta tienes?
-• ¿Es algo urgente que necesita atención inmediata?
-• ¿Hay algún equipo o sistema involucrado?
-
-**Ejemplos útiles:**
-• "El TPV de la caja 3 no funciona y hay cola de clientes"
-• "Necesito información sobre el nuevo procedimiento de devoluciones"
-• "¿Cómo configuro mi usuario en el sistema?"
-
-¿Podrías darme más detalles? 🙏"""
-        
-        return Command(update={
-            "messages": state.get("messages", []) + [AIMessage(content=clarification_message)],
-            "attempts": attempts + 1,
+        update_data = NodeVisitManager.update_execution_path(state, self.name)
+        update_data.update({
+            "current_node": self.name,
+            "messages": state.get("messages", []) + [AIMessage(content=message)],
             "awaiting_user_input": True,
-            "current_node": "classify",
-            "last_activity": datetime.now(),
-            "classification_stage": "awaiting_clarification"
+            "classification_stage": "requesting_initial_info"
         })
+        
+        return Command(update=update_data)
     
-    def _escalate_classification_failure(self, state: EroskiState, reason: str) -> Command:
-        """Escalar por fallo en clasificación"""
-        escalation_message = """Lo siento, no he podido entender el tipo de consulta después de varios intentos. 😔
+#**Mi análisis:** {analysis.reasoning}
+    def _request_incident_explanation(self, state: EroskiState, analysis: IncidentAnalysisResult, update_data: Dict[str, Any]) -> Command:
+        """
+        Solicitar explicación de incidencia cuando no se detectó información clara.
+        """
+        message = """Podrías proporcionarme información sobre la incidencia para ayudarte mejor?.
+🔧 **¿Podrías explicarme específicamente:**
+• ¿Qué equipo o sistema tiene el problema?
+• ¿Qué error aparece exactamente?
+• ¿Cuándo comenzó el problema?
+• ¿Puedes describir qué no funciona como debería?
 
-**No te preocupes** - Te he derivado a un supervisor que podrá ayudarte directamente.
+**Ejemplo:** "El TPV de la caja 3 muestra error 'CONEXIÓN PERDIDA' desde esta mañana y no puedo cobrar"
 
-📞 **Para consultas urgentes inmediatas:**
-• Soporte técnico: +34 946 211 000
-• Email: soporte.tecnico@eroski.es
+¡Con esta información podré ayudarte mucho mejor! 😊"""
+        
+        update_data.update({
+            "current_node": self.name,
+            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "awaiting_user_input": True,
+            "classification_stage": "requesting_details",
+            "llm_analysis": analysis.dict()
+        })
+        
+        return Command(update=update_data)
+    
+    def _proceed_to_collect_details(self, state: EroskiState, analysis: IncidentAnalysisResult, update_data: Dict[str, Any]) -> Command:
+        """
+        Proceder al siguiente nodo cuando se detectó incidencia.
+        """
+        self.logger.info(f"✅ Incidencia detectada: {analysis.incident_type} - Procediendo a recopilar detalles")
+        
+        update_data.update({
+            "current_node": self.name,
+            "query_type": ConsultaType.INCIDENCIA,
+            "incident_type": analysis.incident_type,
+            "incident_description": analysis.incident_description,
+            "confidence_score": analysis.confidence,
+            "awaiting_user_input": False,
+            "classification_stage": "completed",
+            "llm_analysis": analysis.dict()
+        })
+        
+        return Command(update=update_data)
+    
+    def _request_more_specific_info(self, state: EroskiState, update_data: Dict[str, Any]) -> Command:
+        """
+        Solicitar información más específica en revisitas.
+        """
+        visit_count = NodeVisitManager.get_visit_count(state, self.name)
+        
+        message = f"""🔍 Intento #{visit_count} - Necesito información más específica para ayudarte.
+
+Por favor, incluye **todos** estos detalles:
+
+🖥️ **Equipo específico:** (ej: "TPV caja 2", "impresora de etiquetas", "tablet inventario")
+❌ **Error exacto:** (ej: mensaje que aparece, código de error)
+⏰ **Cuándo ocurre:** (ej: "desde esta mañana", "al imprimir tickets")
+🔄 **Frecuencia:** (ej: "siempre", "a veces", "solo al hacer X")
+
+**Ejemplo completo:** "La impresora de la caja 1 no imprime tickets desde las 9:00. Aparece luz roja parpadeando y en pantalla dice 'Error 502 - Papel atascado'. He revisado y no hay papel atascado visible."
+
+¡Así podré diagnosticar el problema correctamente! 🔧"""
+        
+        update_data.update({
+            "current_node": self.name,
+            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "awaiting_user_input": True,
+            "classification_stage": "requesting_specific_details"
+        })
+        
+        return Command(update=update_data)
+    
+    def _escalate_classification_failure(self, state: EroskiState, update_data: Dict[str, Any]) -> Command:
+        """
+        Escalar cuando no se puede clasificar después de varios intentos.
+        """
+        message = """🔼 **Derivando a especialista técnico**
+
+No he podido identificar claramente tu problema después de varios intentos.
+
+📞 **Te conectaré directamente con soporte técnico:**
+• **Teléfono:** +34 946 211 000 (ext. 123)
+• **Email:** soporte.tecnico@eroski.es
+• **Interno:** Extensión 123
+
+**Ellos podrán:**
+✅ Diagnóstico presencial si es necesario
+✅ Acceso remoto a equipos
+✅ Escalación a proveedores externos
+
+**Datos que puedes mencionar:**
+🆔 Sesión: {session_id}
+📅 Hora: {timestamp}
 
 ¡Gracias por tu paciencia! 🙏"""
         
-        return Command(update={
+        session_id = state.get("session_id", "N/A")
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+        
+        formatted_message = message.format(session_id=session_id, timestamp=timestamp)
+        
+        update_data.update({
             "escalation_needed": True,
-            "escalation_reason": f"Fallo en clasificación después de múltiples intentos: {reason}",
-            "escalation_level": "supervisor",
-            "messages": state.get("messages", []) + [AIMessage(content=escalation_message)],
-            "current_node": "classify",
-            "last_activity": datetime.now(),
-            "awaiting_user_input": False
+            "escalation_reason": "No se pudo clasificar la consulta después de múltiples intentos",
+            "escalation_level": "technical_support",
+            "current_node": self.name,
+            "messages": state.get("messages", []) + [AIMessage(content=formatted_message)],
+            "awaiting_user_input": False,
+            "classification_stage": "escalated"
         })
+        
+        return Command(update=update_data)
     
-    def _escalate_error(self, state: EroskiState, error_message: str) -> Command:
-        """Escalar por error técnico"""
-        return Command(update={
+    def _handle_no_response(self, state: EroskiState) -> Command:
+        """
+        Manejar caso donde el usuario no responde.
+        """
+        message = """⏰ No he recibido tu respuesta.
+
+🔄 **¿Sigues ahí?** Si necesitas tiempo para revisar el problema, no hay problema.
+
+**Cuando estés listo, describe:**
+• Qué equipo tiene el problema
+• Qué error aparece
+• Desde cuándo ocurre
+
+Si prefieres hablar directamente con alguien:
+📞 **Soporte:** +34 946 211 000 (ext. 123)"""
+        
+        update_data = NodeVisitManager.update_execution_path(state, self.name)
+        update_data.update({
+            "current_node": self.name,
+            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "awaiting_user_input": True,
+            "classification_stage": "waiting_response"
+        })
+        
+        return Command(update=update_data)
+    
+    def _handle_error(self, state: EroskiState, error_message: str) -> Command:
+        """
+        Manejar errores en la clasificación.
+        """
+        self.logger.error(f"❌ Error en ClassifyQuery: {error_message}")
+        
+        message = """❌ **Error técnico temporal**
+
+Ha ocurrido un problema al procesar tu consulta.
+
+📞 **Por favor, contacta directamente:**
+• **Soporte técnico:** +34 946 211 000 (ext. 123)
+• **Email:** soporte.tecnico@eroski.es
+
+**Proporciona este código de error:** CLASSIFY_ERROR
+
+¡Disculpa las molestias! 🙏"""
+        
+        update_data = {
+            "error_count": state.get("error_count", 0) + 1,
+            "last_error": error_message,
             "escalation_needed": True,
             "escalation_reason": f"Error técnico en clasificación: {error_message}",
-            "escalation_level": "technical",
-            "messages": state.get("messages", []) + [
-                AIMessage(content="Ha ocurrido un error técnico. Te derivo a soporte técnico.")
-            ],
-            "current_node": "classify",
-            "last_activity": datetime.now(),
-            "error_count": state.get("error_count", 0) + 1
-        })
-
-# ========== WRAPPER PARA LANGGRAPH ==========
-
-async def classify_query_node(state: EroskiState) -> Command:
-    """
-    Wrapper function para el nodo de clasificación.
-    
-    Args:
-        state: Estado actual del workflow
+            "current_node": self.name,
+            "messages": state.get("messages", []) + [AIMessage(content=message)],
+            "awaiting_user_input": False
+        }
         
-    Returns:
-        Command con la actualización de estado
-    """
-    node = ClassifyQueryNode()
-    return await node.execute(state)
+        return Command(update=update_data)
+
+# =====================================================
+# Utilidad: NodeVisitManager
+# =====================================================
+
+class NodeVisitManager:
+    """Gestor para manejar lógica de primera visita vs revisita"""
+    
+    @staticmethod
+    def is_first_visit(state: EroskiState, node_name: str) -> bool:
+        """Verificar si es la primera vez que se visita un nodo"""
+        execution_path = state.get("execution_path", [])
+        return node_name not in execution_path
+    
+    @staticmethod
+    def get_visit_count(state: EroskiState, node_name: str) -> int:
+        """Contar cuántas veces se ha visitado un nodo"""
+        execution_path = state.get("execution_path", [])
+        return execution_path.count(node_name)
+    
+    @staticmethod
+    def update_execution_path(state: EroskiState, node_name: str) -> Dict[str, Any]:
+        """Actualizar execution_path con la visita actual"""
+        current_path = state.get("execution_path", [])
+        return {
+            "execution_path": current_path + [node_name],
+            "last_activity": datetime.now()
+        }
+
+# =====================================================
+# Archivo de configuración de incidencias requerido
+# =====================================================
+
+# Crear archivo: config/incident_types.json
+SAMPLE_INCIDENT_CONFIG = {
+    "incident_types": {
+        "tpv": {
+            "name": "TPV (Terminal Punto de Venta)",
+            "description": "Problemas con cajas registradoras y sistemas de cobro",
+            "keywords": ["tpv", "caja", "terminal", "cobro", "ticket", "registradora"],
+            "urgency_level": 3,
+            "category": "hardware",
+            "requires_technical_support": True
+        },
+        "impresora": {
+            "name": "Impresoras",
+            "description": "Problemas con impresoras de tickets, etiquetas o documentos",
+            "keywords": ["impresora", "imprimir", "papel", "tinta", "atasco", "ticket"],
+            "urgency_level": 2,
+            "category": "hardware",
+            "requires_technical_support": False
+        },
+        "red": {
+            "name": "Conectividad de Red",
+            "description": "Problemas de internet, WiFi o conexiones de red",
+            "keywords": ["internet", "wifi", "red", "conexión", "lento", "desconectado"],
+            "urgency_level": 3,
+            "category": "network",
+            "requires_technical_support": True
+        },
+        "software": {
+            "name": "Software y Aplicaciones",
+            "description": "Problemas con programas, aplicaciones o sistemas informáticos",
+            "keywords": ["programa", "aplicación", "software", "sistema", "error", "pantalla"],
+            "urgency_level": 2,
+            "category": "software",
+            "requires_technical_support": False
+        }
+    }
+}
