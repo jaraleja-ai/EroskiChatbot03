@@ -83,7 +83,7 @@ class BaseWorkflow(ABC):
             graph = self.build_graph()
             
             # ✅ CONFIGURAR INTERRUPCIONES PARA RECOPILAR INPUT
-            interrupt_after = ["recopilar_input_usuario"]  # Nodo donde interrumpir
+            interrupt_after = ["interrupcion_identificar_usuario"]  # Nodo donde interrumpir
             
             # ✅ COMPILAR CON CHECKPOINTER E INTERRUPCIONES
             self._graph = graph.compile(
@@ -139,7 +139,7 @@ class BaseWorkflow(ABC):
         Returns:
             Lista de nombres de nodos donde interrumpir
         """
-        return ["recopilar_input_usuario"]
+        return ["interrupcion_identificar_usuario"]
     
     def add_conditional_edges(
         self, 

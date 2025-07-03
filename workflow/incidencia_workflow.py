@@ -8,7 +8,7 @@ from nodes.identificar_usuario import identificar_usuario_node
 from nodes.procesar_incidencia import procesar_incidencia_node
 from nodes.escalar_supervisor import escalar_supervisor_node
 from nodes.finalizar_ticket import finalizar_ticket_node
-from nodes.recopilar_input_usuario import recopilar_input_usuario
+from nodes.interrupcion_procesar_incidencia import interrupcion_identificar_usuario
 from utils.interruption_trip import create_return_trip, get_trip_destination, get_trip_origin
 
 
@@ -17,11 +17,6 @@ from .base_workflow import BaseWorkflow
 from models.state import GraphState
 
 class IncidenciaWorkflow(BaseWorkflow):
-    """
-    🎭 WORKFLOW HÍBRIDO: LangGraph + Actor Pattern
-    
-    VERSIÓN CORREGIDA - Evita errores de import de nodos
-    """
     
     def __init__(self):
         super().__init__("IncidenciaWorkflow")
@@ -48,40 +43,10 @@ class IncidenciaWorkflow(BaseWorkflow):
         graph.add_node("procesar_incidencia", procesar_incidencia_node) 
         graph.add_node("escalar_supervisor", escalar_supervisor_node)
         graph.add_node("finalizar_ticket", finalizar_ticket_node)
-        graph.add_node("recopilar_input_usuario", recopilar_input_usuario)
+        graph.add_node("interrupcion_identificar_usuario", interrupcion_identificar_usuario)
         
         # Punto de entrada
         graph.add_edge(START, "identificar_usuario")
-        
-        # ✅ ROUTING DESTINATIONS COMPLETO - Incluye todos los nodos
-        routing_destinations = {
-            "identificar_usuario": "identificar_usuario",
-            "procesar_incidencia": "procesar_incidencia",
-            #"escalar_supervisor": "escalar_supervisor", 
-            #"finalizar_ticket": "finalizar_ticket",
-            "recopilar_input_usuario": "recopilar_input_usuario",
-            END: END
-        }
-        
-        # ✅ APLICAR ROUTING CONDICIONAL A TODOS LOS NODOS DE DECISIÓN
-        decision_nodes = [
-            "identificar_usuario", 
-            "procesar_incidencia", 
-            "recopilar_input_usuario"  # ✅ CRÍTICO: Incluir recopilar_input_usuario
-        ]
-        
-        for node_name in decision_nodes:
-            graph.add_conditional_edges(
-                node_name,
-                self._route_conversation,
-                routing_destinations
-            )
-            graph.add_conditional_edges(
-                node_name,
-                self._route_interruption,
-                routing_destinations
-            )
-            self.logger.debug(f"🔀 Routing híbrido configurado para {node_name}")
         
         # ✅ EDGES DIRECTOS PARA NODOS TERMINALES
         graph.add_edge("escalar_supervisor", END)
@@ -132,12 +97,12 @@ class IncidenciaWorkflow(BaseWorkflow):
             nodes["finalizar_ticket"] = self._create_fallback_node("finalizar_ticket")
         
         try:
-            from nodes.recopilar_input_usuario import recopilar_input_usuario
-            nodes["recopilar_input_usuario"] = recopilar_input_usuario
-            self.logger.info("✅ recopilar_input_usuario cargado")
+            from nodes.interrupcion_procesar_incidencia import interrupcion_identificar_usuario
+            nodes["interrupcion_identificar_usuario"] = interrupcion_identificar_usuario
+            self.logger.info("✅ interrupcion_identificar_usuario cargado")
         except Exception as e:
-            self.logger.warning(f"⚠️ recopilar_input_usuario no disponible: {e}")
-            nodes["recopilar_input_usuario"] = self._create_fallback_node("recopilar_input_usuario")
+            self.logger.warning(f"⚠️ interrupcion_identificar_usuario no disponible: {e}")
+            nodes["interrupcion_identificar_usuario"] = self._create_fallback_node("interrupcion_identificar_usuario")
         
         return nodes
     
@@ -171,7 +136,7 @@ class IncidenciaWorkflow(BaseWorkflow):
                     "messages": [AIMessage(content="Ticket finalizado.")],
                     "flujo_completado": True
                 })
-            elif node_name == "recopilar_input_usuario":
+            elif node_name == "interrupcion_identificar_usuario":
                 return Command(update={
                     "messages": [AIMessage(content="¿Puedes proporcionar más información?")],
                     "requires_user_input": True
@@ -210,14 +175,14 @@ class IncidenciaWorkflow(BaseWorkflow):
         print("🎛️"*50)
         print("entra al router")
         print("🎛️"*50)
-        return "recopilar_input_usuario"
+        return "interrupcion_identificar_usuario"
 
     def _route_conversation2(self, state: Dict[str, Any]) -> str:
         """
-        🧠 ROUTER HÍBRIDO ACTUALIZADO - Maneja input_received de recopilar_input_usuario
+        🧠 ROUTER HÍBRIDO ACTUALIZADO - Maneja input_received de interrupcion_identificar_usuario
         
         ORDEN DE PRIORIDADES:
-        1. Input recibido (vuelta desde recopilar_input_usuario)
+        1. Input recibido (vuelta desde interrupcion_identificar_usuario)
         2. Señales explícitas de actores
         3. Estado awaiting_input (interrupciones)
         4. Estado de datos del usuario
@@ -236,7 +201,7 @@ class IncidenciaWorkflow(BaseWorkflow):
         self.logger.info(f"🔄 Interruption trip: {state.get('interruption_trip', 0)}")
         
         next_actor = state.get("_next_actor")
-        if next_actor == "recopilar_input_usuario":
+        if next_actor == "interrupcion_identificar_usuario":
             print("🛑"*50)
             print(f"next actor: {next_actor}")
             trip = state["interruption_trip"]
@@ -244,10 +209,10 @@ class IncidenciaWorkflow(BaseWorkflow):
             print(f"interruption_trip: {state['interruption_trip']}")
             print("🛑"*50)
             
-            # ⭐ PRIORIDAD 3: INTERRUPCIONES - Vuelta desde recopilar_input_usuario
+            # ⭐ PRIORIDAD 3: INTERRUPCIONES - Vuelta desde interrupcion_identificar_usuario
             if state.get("_recopilar_execution") == "second_run":
                 print("🌟"*50)
-                print(f"recopilar_input_usuario: {state.get('recopilar_input_usuario', False)}")
+                print(f"interrupcion_identificar_usuario: {state.get('interrupcion_identificar_usuario', False)}")
                 print("🌟"*50)
             print(f"next_actor: {next_actor}")
             return next_actor
@@ -256,7 +221,7 @@ class IncidenciaWorkflow(BaseWorkflow):
             print(f"get_trip_destination: {get_trip_destination}")
             return get_trip_destination
         
-        # ⭐ PRIORIDAD 1: INPUT RECIBIDO - Vuelta desde recopilar_input_usuario
+        # ⭐ PRIORIDAD 1: INPUT RECIBIDO - Vuelta desde interrupcion_identificar_usuario
         actor_decision = state.get("_actor_decision")
         # PRIORIDAD 1: INPUT RECIBIDO
         if actor_decision == "input_received":
@@ -281,7 +246,7 @@ class IncidenciaWorkflow(BaseWorkflow):
             execution_type = state.get("_recopilar_execution")
             if execution_type != "second_run":  # No interrumpir en segunda ejecución
                 self.logger.info("⏸️ ESPERANDO INPUT DEL USUARIO → __interrupt__")
-                return "recopilar_input_usuario"
+                return "interrupcion_identificar_usuario"
         
         # 🔼 PRIORIDAD 4: ESCALACIÓN SOLICITADA
         if state.get("escalar_a_supervisor", False):

@@ -107,19 +107,11 @@ class BaseNode(ABC):
         next_actor: str = None,
         completion_message: str = None,
         **actor_data
-    ) -> Command:
-        """
-        🎯 SEÑAL DE ACTOR: "He completado mi trabajo"
-        
-        El actor señala explícitamente que terminó y sugiere el próximo paso.
-        """
+    ) -> dict:
         self._record_decision(ActorDecision.COMPLETE, next_actor)
         
         update_data = {
-            **state,  # ✅ CORREGIDO: Faltaba la coma
             **actor_data,
-            "_actor_decision": ActorDecision.COMPLETE,
-            "_next_actor": next_actor,  # Señal explícita al router
             "_completion_message": completion_message
         }
         
@@ -127,30 +119,24 @@ class BaseNode(ABC):
             update_data["messages"] = [AIMessage(content=completion_message)]
         
         self.logger.info(f"✅ {self.name} COMPLETO → señalando a {next_actor}")
-        return Command(update=update_data)
+        return update_data
 
     def signal_need_input(
         self, 
         state: Dict[str, Any],
         request_message: str,
         context: Dict[str, Any] = None
-    ) -> Command:
+    ) -> dict:
         """🎯 VERSIÓN SIMPLE: Push al stack"""
         
         # Push al stack
         stack = state.get("_routing_stack", [])
         stack.append(self.name)
-        
-        return Command(update={
-            **state,
-            "_actor_decision": "need_input",
-            "_next_actor": "recopilar_input_usuario",
-            "_request_message": request_message,
-            "awaiting_input": True,
-            "requires_user_input": True,
+        update={
             "messages": [AIMessage(content=request_message)],
-            "_routing_stack": stack                    # ✅ Solo esto
-        })
+        }
+
+        return update
 
 
     def signal_escalation(
@@ -159,7 +145,7 @@ class BaseNode(ABC):
         reason: str,
         attempts: int = None,  # ✅ CORREGIDO: Parámetro opcional
         **escalation_context
-    ) -> Command:
+    ) -> dict:
         """
         🎯 SEÑAL DE ACTOR: "Necesito escalación"
         
@@ -174,17 +160,14 @@ class BaseNode(ABC):
         )
         
         update_data = {
-            **state,
             **escalation_context,
-            "_actor_decision": ActorDecision.ESCALATE,
-            "_next_actor": "escalar_supervisor",
             "escalar_a_supervisor": True,
             "razon_escalacion": reason,
             "messages": [AIMessage(content=escalation_message)]
         }
         
         self.logger.info(f"🔼 {self.name} ESCALA → supervisor: {reason}")
-        return Command(update=update_data)
+        return update_data
 
 
     def _record_decision(self, decision: str, target: str = None):

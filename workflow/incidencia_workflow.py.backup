@@ -12,14 +12,14 @@ from nodes.identificar_usuario import identificar_usuario_node
 from nodes.procesar_incidencia import procesar_incidencia_node
 from nodes.escalar_supervisor import escalar_supervisor_node
 from nodes.finalizar_ticket import finalizar_ticket_node
-from nodes.recopilar_input_usuario import recopilar_input_usuario
+from nodes.interrupcion_identificar_usuario import interrupcion_identificar_usuario
 
 class IncidenciaWorkflow(BaseWorkflow):
     """
     🎭 WORKFLOW HÍBRIDO ACTUALIZADO: LangGraph + Actor Pattern
     
     NUEVAS CARACTERÍSTICAS:
-    - ✅ Interrupciones centralizadas SOLO en recopilar_input_usuario
+    - ✅ Interrupciones centralizadas SOLO en interrupcion_identificar_usuario
     - ✅ Router que respeta señales de actores ANTES de decidir
     - ✅ Estado siempre actualizado cuando llega al router
     - ✅ Sin bucles infinitos por diseño
@@ -33,7 +33,7 @@ class IncidenciaWorkflow(BaseWorkflow):
     ROUTER INTELIGENTE ACTUALIZADO:
     - Los actores DECIDEN, el router solo EJECUTA
     - Prioriza señales explícitas de actores
-    - Centraliza interrupciones en recopilar_input_usuario
+    - Centraliza interrupciones en interrupcion_identificar_usuario
     - Fallback inteligente sin bucles
     """
     
@@ -53,18 +53,18 @@ class IncidenciaWorkflow(BaseWorkflow):
         graph.add_node("procesar_incidencia", procesar_incidencia_node) 
         graph.add_node("escalar_supervisor", escalar_supervisor_node)
         graph.add_node("finalizar_ticket", finalizar_ticket_node)
-        graph.add_node("recopilar_input_usuario", recopilar_input_usuario)  # ⭐ NODO DE INTERRUPCIONES
+        graph.add_node("interrupcion_identificar_usuario", interrupcion_identificar_usuario)  # ⭐ NODO DE INTERRUPCIONES
         
         # Punto de entrada
         graph.add_edge(START, "identificar_usuario")
         
-        # ✅ ROUTING HÍBRIDO ACTUALIZADO - INCLUYE recopilar_input_usuario
+        # ✅ ROUTING HÍBRIDO ACTUALIZADO - INCLUYE interrupcion_identificar_usuario
         self.routing_destinations = {
             "identificar_usuario": "identificar_usuario",
             "procesar_incidencia": "procesar_incidencia",
             "escalar_supervisor": "escalar_supervisor", 
             "finalizar_ticket": "finalizar_ticket",
-            "recopilar_input_usuario": "recopilar_input_usuario",  # ⭐ INCLUIR EN DESTINOS
+            "interrupcion_identificar_usuario": "interrupcion_identificar_usuario",  # ⭐ INCLUIR EN DESTINOS
             END: END
         }
         
@@ -72,7 +72,7 @@ class IncidenciaWorkflow(BaseWorkflow):
         decision_actors = [
             "identificar_usuario", 
             "procesar_incidencia", 
-            "recopilar_input_usuario"  # ⭐ INCLUIR PARA QUE PUEDA DIRIGIR DESPUÉS DE INTERRUPCIÓN
+            "interrupcion_identificar_usuario"  # ⭐ INCLUIR PARA QUE PUEDA DIRIGIR DESPUÉS DE INTERRUPCIÓN
         ]
         
         for actor_name in decision_actors:
@@ -236,8 +236,8 @@ class IncidenciaWorkflow(BaseWorkflow):
         return {
             "workflow_name": self.name,
             "total_nodes": len(self.routing_destinations) - 1,  # -1 para excluir END
-            "decision_nodes": 3,  # identificar_usuario, procesar_incidencia, recopilar_input_usuario
+            "decision_nodes": 3,  # identificar_usuario, procesar_incidencia, interrupcion_identificar_usuario
             "terminal_nodes": 2,  # escalar_supervisor, finalizar_ticket
-            "interruption_handler": "recopilar_input_usuario",
+            "interruption_handler": "interrupcion_identificar_usuario",
             "routing_strategy": "centralized_interruptions_with_actor_signals"
         }

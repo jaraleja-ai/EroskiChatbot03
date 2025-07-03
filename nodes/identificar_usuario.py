@@ -11,13 +11,6 @@ from utils.extractors.user_extractor import extraer_datos_usuario
 from utils.interruption_trip import create_interruption_trip
 class IdentificarUsuarioNode(BaseNode):
     """
-    🎭 ACTOR HÍBRIDO: Identificar y validar datos del usuario
-    
-    COMPORTAMIENTO ACTOR:
-    - ✅ Autonomía total en decisiones
-    - ✅ Señales claras al router
-    - ✅ Estado encapsulado
-    - ✅ Evita bucles infinitos
     
     RESPONSABILIDADES:
     - Extraer nombre y email de mensajes
@@ -58,20 +51,26 @@ class IdentificarUsuarioNode(BaseNode):
         # 🛑 PROTECCIÓN ANTI-BUCLE INMEDIATA
         if execution_count > 10:
             self.logger.error(f"🛑 BUCLE INFINITO DETECTADO - {execution_count} ejecuciones")
-            return self.signal_escalation(
+            update_data = self.signal_escalation(
                 state,
                 f"Bucle infinito en identificar_usuario después de {execution_count} intentos",
                 attempts=execution_count
             )
+            return Command(goto="escalar_supervisor",
+                           update=update_data)
         
         # 🔄 DETECCIÓN DE MENSAJE REPETIDO 
         if current_message == last_processed and current_message and execution_count > 2:
             self.logger.warning(f"🔄 MENSAJE REPETIDO DETECTADO - ESCALAR")
-            return self.signal_escalation(
+            
+
+            update_data = self.signal_escalation(
                 state,
-                "Usuario enviando el mismo mensaje repetidamente",
+                f"Bucle infinito en identificar_usuario después de {execution_count} intentos",
                 attempts=execution_count
             )
+            return Command(goto="escalar_supervisor",
+                           update=update_data)
         
         # 📊 ANÁLISIS DEL ESTADO ACTUAL
         nombre = state.get("nombre")
@@ -111,9 +110,8 @@ class IdentificarUsuarioNode(BaseNode):
                 f"Ahora cuéntame, ¿cuál es el problema técnico que necesitas resolver?"
             )
             
-            return self.signal_completion(
+            update_data = self.signal_completion(
                 state,
-                next_actor="procesar_incidencia",
                 completion_message=mensaje_confirmacion,
                 nombre=final_nombre,
                 email=final_email,
@@ -123,17 +121,21 @@ class IdentificarUsuarioNode(BaseNode):
                 _last_processed_message=current_message,
                 _execution_count=execution_count + 1
             )
+            return Command(goto="procesar_incidencia",
+                           update=update_data)
         
         elif intentos >= 5:
             # 🛑 DEMASIADOS INTENTOS
             self.logger.warning("🛑 DEMASIADOS INTENTOS → Escalar")
             
-            return self.signal_escalation(
+            update_data = self.signal_escalation(
                 state,
                 f"No se pudieron obtener datos después de {intentos} intentos",
                 attempts=intentos
             )
-        
+            return Command(goto="escalar_supervisor",
+                           update=update_data)
+
         else:
             # 📥 SOLICITAR DATOS FALTANTES
             if not final_nombre and not final_email:
@@ -168,10 +170,11 @@ class IdentificarUsuarioNode(BaseNode):
             self.logger.info(f"   mensaje: '{mensaje[:50]}...'")
             self.logger.info(f"   intentos: {intentos}")
             
-            self.logger.info("📥 IdentificarUsuario solicita input del usuario → router → recopilar_input_usuario")
+            self.logger.info("📥 IdentificarUsuario solicita input del usuario → router → interrupcion_identificar_usuario")
             
             # ✅ USAR EL MÉTODO CORREGIDO
-            return self.signal_need_input(
+            
+            update_data = self.signal_need_input(
                 state={**state, 
                        "nombre": final_nombre, 
                        "email": final_email, 
@@ -188,6 +191,8 @@ class IdentificarUsuarioNode(BaseNode):
                     "timestamp": datetime.now().isoformat()
                 }
             )
+            return Command(goto="interrupcion_identificar_usuario",
+                           update=update_data)
 
     # =====================================================
     # MÉTODOS AUXILIARES
@@ -231,7 +236,7 @@ class IdentificarUsuarioNode(BaseNode):
         state: Dict[str, Any], 
         request_message: str, 
         context: Dict[str, Any] = None
-    ) -> Command:
+    ) -> dict:
         """
         🎭 Señalar que se necesita input del usuario CORREGIDO.
         
@@ -240,23 +245,12 @@ class IdentificarUsuarioNode(BaseNode):
         2. ✅ Contexto mejorado para continuación
         3. ✅ Logging detallado para debugging
         """
-
-
-        
         # Ahora self.name = "identificar_usuario" ✅
-        
         # Actualizar el estado
-        state["messages"] = state.get("messages", []) + [request_message]
-
-        
-    
-        self.logger.info("📥 IdentificarUsuario solicita input del usuario → router → recopilar_input_usuario")
+        messages = state.get("messages", []) + [request_message]
+        self.logger.info("📥 IdentificarUsuario solicita input del usuario → router → interrupcion_identificar_usuario")
         self.logger.info(f"📥 IdentificarUsuario SOLICITA INPUT: {request_message[:50]}...")
         # Crear interrupción de ida
-       
-        trip = create_interruption_trip(self.name, "recopilar_input_usuario", "ida")
-        state["interruption_trip"] = trip
-
         # Preparar contexto por defecto si no se proporciona
         if context is None:
             context = {
@@ -268,17 +262,14 @@ class IdentificarUsuarioNode(BaseNode):
             }
         
         # 🎯 COMANDO CORREGIDO CON SEÑALIZACIÓN CLARA
-        return Command(update={
-            **state,
-            # 🎭 SEÑALES CLARAS PARA EL ROUTER
-            "_actor_decision": "need_input",
-            "_next_actor": "recopilar_input_usuario",
+
+        update={
+            "messages": messages,
             "_request_message": request_message,
-            "awaiting_input": True,
-            "requires_user_input": True,
             "messages": [AIMessage(content=request_message)],
             
-        })
+        }
+        return update
 
 # =====================================================
 # WRAPPER PARA LANGGRAPH

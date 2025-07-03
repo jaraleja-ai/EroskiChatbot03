@@ -22,7 +22,7 @@ logging.basicConfig(
 # Importar los módulos actualizados
 from nodes.base_node import BaseNode
 from nodes.identificar_usuario import IdentificarUsuarioNode, identificar_usuario_node
-from nodes.recopilar_input_usuario import RecopilarInputUsuarioNode, recopilar_input_usuario
+from nodes.interrupcion_procesar_incidencia import InterrupcionIdentificarUsuarioNode, interrupcion_identificar_usuario
 from workflow.incidencia_workflow import IncidenciaWorkflow
 from models.state import GraphState
 from utils.crear_estado_inicial import crear_estado_inicial
@@ -31,7 +31,7 @@ class TestInterrupcionesCentralizadas:
     """
     Suite de pruebas para validar:
     1. get_state_diff funciona correctamente
-    2. Interrupciones centralizadas en recopilar_input_usuario
+    2. Interrupciones centralizadas en interrupcion_identificar_usuario
     3. Router dirige correctamente según señales
     4. Estado se actualiza apropiadamente
     """
@@ -135,7 +135,7 @@ class TestInterrupcionesCentralizadas:
             update = command.update
             
             assert update.get("_actor_decision") == "need_input", "No señala need_input"
-            assert update.get("_next_actor") == "recopilar_input_usuario", "No dirige a recopilar_input_usuario"
+            assert update.get("_next_actor") == "interrupcion_identificar_usuario", "No dirige a interrupcion_identificar_usuario"
             assert update.get("requires_user_input") == True, "No establece requires_user_input"
             assert update.get("_request_message") == "Necesito tu nombre y email", "Mensaje incorrecto"
             
@@ -154,27 +154,27 @@ class TestInterrupcionesCentralizadas:
         try:
             workflow = IncidenciaWorkflow()
             
-            # Estados de prueba que deberían dirigir a recopilar_input_usuario
+            # Estados de prueba que deberían dirigir a interrupcion_identificar_usuario
             test_cases = [
                 {
                     "name": "requires_user_input=True",
                     "state": {"requires_user_input": True},
-                    "expected": "recopilar_input_usuario"
+                    "expected": "interrupcion_identificar_usuario"
                 },
                 {
                     "name": "_actor_decision=need_input", 
                     "state": {"_actor_decision": "need_input"},
-                    "expected": "recopilar_input_usuario"
+                    "expected": "interrupcion_identificar_usuario"
                 },
                 {
                     "name": "_request_message existe",
                     "state": {"_request_message": "Necesito datos"},
-                    "expected": "recopilar_input_usuario"
+                    "expected": "interrupcion_identificar_usuario"
                 },
                 {
                     "name": "awaiting_input=True",
                     "state": {"awaiting_input": True},
-                    "expected": "recopilar_input_usuario"
+                    "expected": "interrupcion_identificar_usuario"
                 }
             ]
             
@@ -183,7 +183,7 @@ class TestInterrupcionesCentralizadas:
                 assert result == case["expected"], f"{case['name']}: {result} != {case['expected']}"
                 self.logger.debug(f"✓ {case['name']}: {result}")
             
-            self.test_results.append(("✅ Router centraliza", "PASSED", "Todas las interrupciones van a recopilar_input_usuario"))
+            self.test_results.append(("✅ Router centraliza", "PASSED", "Todas las interrupciones van a interrupcion_identificar_usuario"))
             self.logger.info("✅ Test 3 PASSED: Router centraliza interrupciones correctamente")
             
         except Exception as e:
@@ -212,13 +212,13 @@ class TestInterrupcionesCentralizadas:
             
             # Verificar que señala necesidad de input
             assert result1.update.get("_actor_decision") == "need_input", "No señala need_input"
-            assert result1.update.get("_next_actor") == "recopilar_input_usuario", "No va a recopilar_input_usuario"
+            assert result1.update.get("_next_actor") == "interrupcion_identificar_usuario", "No va a interrupcion_identificar_usuario"
             
-            # 2. Simular que router dirige a recopilar_input_usuario
+            # 2. Simular que router dirige a interrupcion_identificar_usuario
             state_after_identificar = {**initial_state, **result1.update}
             
-            # 3. Ejecutar recopilar_input_usuario
-            recopilar_node = RecopilarInputUsuarioNode()
+            # 3. Ejecutar interrupcion_identificar_usuario
+            recopilar_node = InterrupcionIdentificarUsuarioNode()
             result2 = await recopilar_node.execute(state_after_identificar)
             
             # Verificar que establece interrupción
