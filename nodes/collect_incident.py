@@ -76,6 +76,8 @@ class CollectIncidentDetailsNode(BaseNode):
         Returns:
             Command con la información recopilada
         """
+        print("🎗️"*50)
+        print(f"entra en el nodo: {self.__class__.__name__}")
         try:
             # Verificar si ya tenemos información completa
             if self._has_complete_incident_info(state):

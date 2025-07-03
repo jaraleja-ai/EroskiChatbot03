@@ -216,6 +216,8 @@ class search_knowledge_node(BaseNode):
         Returns:
             Command con la información encontrada
         """
+        print("🎗️"*50)
+        print(f"entra en el nodo: {self.__class__.__name__}")
         try:
             # Obtener consulta del usuario
             user_message = self.get_last_user_message(state)

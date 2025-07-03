@@ -1,5 +1,5 @@
 # =====================================================
-# utils/database/connection_manager.py - Gestor de conexiones
+# utils/database/connection_manager.py - CORREGIDO
 # =====================================================
 import asyncio
 from typing import Dict, Optional, TYPE_CHECKING
@@ -28,8 +28,9 @@ class ConnectionManager:
             from .user_repository import UserRepository
             from .incidencia_repository import IncidenciaRepository
             
-            self._repositories["user"] = UserRepository()
-            self._repositories["incidencia"] = IncidenciaRepository()
+            # 🔥 CORRECCIÓN: Pasar self como connection_manager
+            self._repositories["user"] = UserRepository(self)
+            self._repositories["incidencia"] = IncidenciaRepository(self)
             
             self._initialized = True
             self.logger.info("✅ Repositorios inicializados")

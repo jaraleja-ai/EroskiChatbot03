@@ -70,6 +70,8 @@ class ClassifyQueryNode(BaseNode):
         Returns:
             Command con la clasificación realizada
         """
+        print("🎗️"*50)
+        print(f"entra en el nodo: {self.__class__.__name__}")
         try:
             # Obtener último mensaje del usuario
             user_message = self.get_last_user_message(state)

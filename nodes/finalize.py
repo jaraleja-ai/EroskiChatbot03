@@ -62,6 +62,8 @@ class FinalizeConversationNode(BaseNode):
         Returns:
             Command con la finalización completada
         """
+        print("🎗️"*50)
+        print(f"entra en el nodo: {self.__class__.__name__}")
         try:
             # Determinar tipo de finalización
             finalization_type = self._determine_finalization_type(state)

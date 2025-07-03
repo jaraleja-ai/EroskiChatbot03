@@ -205,6 +205,8 @@ class BaseWorkflow(ABC):
         Returns:
             Estado final después de la ejecución
         """
+        print("🎗️"*50)
+        print(f"entra en el nodo: {self.__class__.__name__}")
         try:
             self.logger.info(f"🚀 Ejecutando workflow {self.name}")
             

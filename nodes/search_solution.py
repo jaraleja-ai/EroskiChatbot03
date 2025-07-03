@@ -158,6 +158,8 @@ class SearchSolutionNode(BaseNode):
         Returns:
             Command con las soluciones encontradas
         """
+        print("🎗️"*50)
+        print(f"entra en el nodo: {self.__class__.__name__}")
         try:
             # Buscar soluciones aplicables
             solutions = self._search_applicable_solutions(state)

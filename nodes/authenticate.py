@@ -58,6 +58,8 @@ class AuthenticateEmployeeNode:
         Returns:
             Command con actualización de estado
         """
+        print("🎗️"*50)
+        print(f"entra en el nodo: {self.__class__.__name__}")
         try:
             self.logger.info("🔐 Iniciando proceso de autenticación con BD")
             
@@ -143,17 +145,20 @@ Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona
         
         # Extraer último mensaje del usuario
         user_message = self._get_last_user_message(state)
+        self.logger.info(f"🌄JGL: 📨 mensaje usuario: {user_message}")
         if not user_message:
             return self._request_credentials_retry(state, "No se encontró mensaje del usuario")
         
         # Extraer credenciales del mensaje
         credentials = self._extract_credentials(user_message)
+        self.logger.info(f"🌄JGL: 🪪 credenciales: {credentials}")
         
         if not credentials["valid"]:
             return self._request_credentials_retry(state, credentials.get("error", "Credenciales no válidas"))
         
         # CAMBIO: Validar credenciales contra base de datos PostgreSQL
         validation_result = await self._validate_employee_credentials_db(credentials)
+        self.logger.info(f"🌄JGL: 🏬 resultado de validación: {validation_result}")
         
         if validation_result["valid"]:
             return self._handle_successful_authentication(state, validation_result)
