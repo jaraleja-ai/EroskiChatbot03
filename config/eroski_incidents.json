@@ -1,0 +1,295 @@
+{
+  "incident_types": {
+    "tpv": {
+      "name": "TPV (Terminal Punto de Venta)",
+      "description": "Problemas con las cajas registradoras y terminales de pago",
+      "keywords": ["tpv", "caja", "terminal", "pago", "tarjeta", "efectivo", "ticket", "registradora"],
+      "urgency_level": 3,
+      "estimated_resolution_minutes": 15,
+      "requires_technical_support": true,
+      "common_issues": [
+        "Terminal no enciende",
+        "No lee tarjetas",
+        "Error al imprimir tickets",
+        "Pantalla en blanco",
+        "Problemas de conectividad",
+        "Error en el cajón de dinero"
+      ],
+      "escalation_contacts": ["soporte.tpv@eroski.es", "tecnico.tienda@eroski.es"],
+      "category": "hardware"
+    },
+    "balanzas": {
+      "name": "Balanzas y Básculas",
+      "description": "Problemas con las balanzas de productos frescos y etiquetado",
+      "keywords": ["balanza", "bascula", "peso", "etiqueta", "precio", "fresco", "pesado"],
+      "urgency_level": 2,
+      "estimated_resolution_minutes": 20,
+      "requires_technical_support": false,
+      "common_issues": [
+        "No imprime etiquetas",
+        "Peso incorrecto",
+        "Error de calibración",
+        "Pantalla no funciona",
+        "No se conecta al sistema",
+        "Precios incorrectos en etiquetas"
+      ],
+      "escalation_contacts": ["soporte.balanzas@eroski.es"],
+      "category": "hardware"
+    },
+    "red": {
+      "name": "Red y Conectividad",
+      "description": "Problemas de internet, WiFi y conectividad general",
+      "keywords": ["internet", "wifi", "red", "conexion", "lento", "sin internet", "desconectado"],
+      "urgency_level": 4,
+      "estimated_resolution_minutes": 10,
+      "requires_technical_support": true,
+      "common_issues": [
+        "Sin conexión a internet",
+        "WiFi muy lento",
+        "No encuentra la red",
+        "Conexión intermitente",
+        "Error de autenticación WiFi",
+        "Sistemas offline"
+      ],
+      "escalation_contacts": ["soporte.red@eroski.es", "infraestructura@eroski.es"],
+      "category": "network"
+    },
+    "impresoras": {
+      "name": "Impresoras y Etiquetadoras",
+      "description": "Problemas con impresoras de tickets, etiquetas y documentos",
+      "keywords": ["impresora", "imprimir", "papel", "tinta", "ticket", "etiqueta", "atasco"],
+      "urgency_level": 2,
+      "estimated_resolution_minutes": 15,
+      "requires_technical_support": false,
+      "common_issues": [
+        "No imprime",
+        "Se atasca el papel",
+        "Calidad de impresión mala",
+        "Sin tinta o tóner",
+        "Error de comunicación",
+        "Impresión lenta"
+      ],
+      "escalation_contacts": ["soporte.impresoras@eroski.es"],
+      "category": "hardware"
+    },
+    "software": {
+      "name": "Software Corporativo",
+      "description": "Problemas con aplicaciones y sistemas internos de Eroski",
+      "keywords": ["aplicacion", "programa", "software", "sistema", "login", "acceso", "sap"],
+      "urgency_level": 3,
+      "estimated_resolution_minutes": 25,
+      "requires_technical_support": true,
+      "common_issues": [
+        "No puedo acceder al sistema",
+        "Aplicación se cierra sola",
+        "Error al guardar datos",
+        "Pantalla se congela",
+        "Contraseña no funciona",
+        "Sistema muy lento"
+      ],
+      "escalation_contacts": ["soporte.software@eroski.es", "sap.support@eroski.es"],
+      "category": "software"
+    },
+    "email": {
+      "name": "Correo Electrónico",
+      "description": "Problemas con el email corporativo y Outlook",
+      "keywords": ["email", "correo", "outlook", "enviar", "recibir", "spam", "buzon"],
+      "urgency_level": 2,
+      "estimated_resolution_minutes": 15,
+      "requires_technical_support": false,
+      "common_issues": [
+        "No recibo emails",
+        "No puedo enviar emails",
+        "Buzón lleno",
+        "Error de configuración",
+        "Problemas con adjuntos",
+        "Emails van a spam"
+      ],
+      "escalation_contacts": ["soporte.email@eroski.es"],
+      "category": "communication"
+    },
+    "telefonia": {
+      "name": "Sistema Telefónico",
+      "description": "Problemas con teléfonos y comunicaciones internas",
+      "keywords": ["telefono", "llamada", "extension", "comunicacion", "sonido", "auricular"],
+      "urgency_level": 3,
+      "estimated_resolution_minutes": 20,
+      "requires_technical_support": true,
+      "common_issues": [
+        "Teléfono no funciona",
+        "No hay línea",
+        "Problemas de audio",
+        "No puedo transferir llamadas",
+        "Extensión no responde",
+        "Sonido entrecortado"
+      ],
+      "escalation_contacts": ["soporte.telefonia@eroski.es"],
+      "category": "communication"
+    },
+    "camaras": {
+      "name": "Sistema de Videovigilancia",
+      "description": "Problemas con cámaras de seguridad y videovigilancia",
+      "keywords": ["camara", "video", "vigilancia", "grabacion", "monitor", "seguridad"],
+      "urgency_level": 2,
+      "estimated_resolution_minutes": 30,
+      "requires_technical_support": true,
+      "common_issues": [
+        "Cámara no graba",
+        "Imagen borrosa",
+        "No hay imagen",
+        "Monitor no funciona",
+        "Error de conexión",
+        "Falta grabación"
+      ],
+      "escalation_contacts": ["seguridad@eroski.es", "soporte.camaras@eroski.es"],
+      "category": "security"
+    },
+    "climatizacion": {
+      "name": "Climatización y Temperatura",
+      "description": "Problemas con aire acondicionado, calefacción y control de temperatura",
+      "keywords": ["aire", "temperatura", "frio", "calor", "climatizacion", "ventilacion"],
+      "urgency_level": 3,
+      "estimated_resolution_minutes": 45,
+      "requires_technical_support": true,
+      "common_issues": [
+        "Aire acondicionado no funciona",
+        "Temperatura muy alta/baja",
+        "No hay ventilación",
+        "Ruido extraño en equipos",
+        "Control remoto no responde",
+        "Filtros sucios"
+      ],
+      "escalation_contacts": ["mantenimiento@eroski.es", "climatizacion@eroski.es"],
+      "category": "facilities"
+    },
+    "iluminacion": {
+      "name": "Iluminación",
+      "description": "Problemas con luces, alumbrado y sistemas eléctricos",
+      "keywords": ["luz", "iluminacion", "bombilla", "neon", "electrico", "apagar", "encender"],
+      "urgency_level": 2,
+      "estimated_resolution_minutes": 30,
+      "requires_technical_support": true,
+      "common_issues": [
+        "Luces no encienden",
+        "Bombillas fundidas",
+        "Parpadeo constante",
+        "Iluminación insuficiente",
+        "Interruptor no funciona",
+        "Luces se apagan solas"
+      ],
+      "escalation_contacts": ["mantenimiento@eroski.es", "electrico@eroski.es"],
+      "category": "facilities"
+    },
+    "acceso": {
+      "name": "Control de Acceso",
+      "description": "Problemas con tarjetas de empleado, cerraduras y accesos",
+      "keywords": ["tarjeta", "acceso", "puerta", "cerradura", "empleado", "entrada", "badge"],
+      "urgency_level": 3,
+      "estimated_resolution_minutes": 20,
+      "requires_technical_support": true,
+      "common_issues": [
+        "Tarjeta no funciona",
+        "Puerta no abre",
+        "Cerradura bloqueada",
+        "Sistema de acceso caído",
+        "Tarjeta desmagnetizada",
+        "Código de acceso olvidado"
+      ],
+      "escalation_contacts": ["seguridad@eroski.es", "accesos@eroski.es"],
+      "category": "security"
+    },
+    "pos": {
+      "name": "Sistemas POS",
+      "description": "Problemas con sistemas de punto de venta y gestión comercial",
+      "keywords": ["pos", "venta", "comercial", "inventario", "stock", "precio"],
+      "urgency_level": 3,
+      "estimated_resolution_minutes": 25,
+      "requires_technical_support": true,
+      "common_issues": [
+        "Sistema POS lento",
+        "Precios incorrectos",
+        "Error en inventario",
+        "No actualiza stock",
+        "Problemas de sincronización",
+        "Error en promociones"
+      ],
+      "escalation_contacts": ["soporte.pos@eroski.es", "sistemas.comerciales@eroski.es"],
+      "category": "software"
+    },
+    "equipos_frio": {
+      "name": "Equipos de Frío",
+      "description": "Problemas con cámaras frigoríficas, congeladores y refrigeración",
+      "keywords": ["frio", "congelador", "nevera", "refrigerador", "camara", "temperatura"],
+      "urgency_level": 4,
+      "estimated_resolution_minutes": 60,
+      "requires_technical_support": true,
+      "common_issues": [
+        "Cámara frigorífica no enfría",
+        "Temperatura alta en congelador",
+        "Alarma de temperatura",
+        "Puerta no cierra bien",
+        "Ruido anormal en motor",
+        "Formación excesiva de hielo"
+      ],
+      "escalation_contacts": ["frio@eroski.es", "mantenimiento.urgente@eroski.es"],
+      "category": "equipment"
+    },
+    "general": {
+      "name": "Consulta General",
+      "description": "Consultas generales que no se clasifican en categorías específicas",
+      "keywords": ["consulta", "pregunta", "informacion", "ayuda", "general", "otros"],
+      "urgency_level": 1,
+      "estimated_resolution_minutes": 10,
+      "requires_technical_support": false,
+      "common_issues": [
+        "Pregunta sobre procedimientos",
+        "Información de contacto",
+        "Estado de tickets",
+        "Consulta de horarios",
+        "Información general",
+        "Otros temas"
+      ],
+      "escalation_contacts": ["info@eroski.es"],
+      "category": "general"
+    },
+    "urgente": {
+      "name": "Incidencia Urgente",
+      "description": "Problemas críticos que requieren atención inmediata",
+      "keywords": ["urgente", "critico", "emergencia", "parado", "bloqueado", "importante"],
+      "urgency_level": 4,
+      "estimated_resolution_minutes": 5,
+      "requires_technical_support": true,
+      "common_issues": [
+        "Sistema crítico caído",
+        "Pérdida total de conectividad",
+        "Problema de seguridad",
+        "Equipamiento crítico parado",
+        "Emergencia técnica",
+        "Incidente que impide operar"
+      ],
+      "escalation_contacts": [
+        "urgencias@eroski.es", 
+        "supervisor.tecnico@eroski.es",
+        "gerencia.tienda@eroski.es"
+      ],
+      "category": "critical"
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "last_updated": "2024-12-19",
+    "description": "Configuración de tipos de incidencia específicos para Eroski",
+    "total_types": 14,
+    "categories": [
+      "hardware",
+      "software", 
+      "network",
+      "communication",
+      "security",
+      "facilities",
+      "equipment",
+      "general",
+      "critical"
+    ]
+  }
+}
