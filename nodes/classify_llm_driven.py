@@ -82,6 +82,7 @@ class ClassificationDecision(BaseModel):
     progress_assessment: str = Field(description="Evaluación del progreso hacia la solución", default="unknown")
     new_information_provided: bool = Field(description="Si el usuario proporcionó información nueva", default=False)
     questions_already_asked: List[str] = Field(description="Preguntas que ya se han hecho anteriormente", default=[])
+    stuck_in_loop: bool = Field(description="Si está atascado en un bucle sin progreso", default=False)
 class ClassifyConfirmationDecision(BaseModel):
     """DEPRECATED - Usar ConfirmationDecision de utils.incident_helpers"""
     pass
