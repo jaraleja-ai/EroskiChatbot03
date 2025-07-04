@@ -1,16 +1,20 @@
 # =====================================================
-# nodes/classify_llm_driven.py - Nodo de Clasificación LLM-Driven
+# nodes/classify_llm_driven.py - Nodo de Clasificación LLM-Driven Refactorizado
 # =====================================================
 """
 Nodo de clasificación inteligente dirigido completamente por LLM.
 
-FUNCIONALIDAD:
-1. LLM analiza el historial de mensajes para identificar incidencias
-2. Identifica tipo de incidencia usando keywords del archivo JSON
-3. Hace preguntas específicas para detectar el problema exacto
-4. Propone solución cuando identifica el problema
-5. Escala a supervisor si no puede identificar la incidencia
-6. Mantiene conversación natural durante todo el proceso
+REFACTORIZACIÓN:
+- Uso de clases helper especializadas
+- Separación clara de responsabilidades
+- Código más mantenible y testeable
+- Orquestación centralizada en el nodo principal
+
+HELPERS UTILIZADOS:
+- IncidentCodeManager: Gestión de códigos únicos
+- SolutionSearcher: Búsqueda de soluciones en archivo
+- ConfirmationLLMHandler: Interpretación inteligente de confirmaciones
+- IncidentPersistence: Persistencia en archivo JSON
 """
 
 from typing import Dict, Any, Optional, List, Union
@@ -21,7 +25,6 @@ import logging
 import json
 import re
 from pathlib import Path
-import random
 
 from models.eroski_state import EroskiState
 from nodes.base_node import BaseNode
@@ -29,7 +32,16 @@ from utils.llm.providers import get_llm
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
-from config.incident_config import IncidentConfigLoader
+
+# ✅ NUEVO: Importar helpers especializados
+from utils.incident_helpers import (
+    IncidentCodeManager,
+    SolutionSearcher, 
+    ConfirmationLLMHandler,
+    IncidentPersistence,
+    IncidentHelpersFactory,
+    ConfirmationDecision
+)
 
 
 # =============================================================================
@@ -69,24 +81,8 @@ class ClassificationDecision(BaseModel):
     new_information_provided: bool = Field(description="Si el usuario proporcionó información nueva", default=False)
     questions_already_asked: List[str] = Field(description="Preguntas que ya se han hecho anteriormente", default=[])
 class ClassifyConfirmationDecision(BaseModel):
-    """Decisión del LLM sobre la confirmación del usuario"""
-    
-    user_intent: str = Field(description="Intención del usuario: 'solution_worked', 'solution_failed', 'new_incident', 'needs_clarification'")
-    confidence_level: float = Field(description="Confianza en la interpretación (0-1)", default=0.0)
-    
-    # Para soluciones
-    solution_successful: bool = Field(description="Si la solución funcionó", default=False)
-    additional_details: Optional[str] = Field(description="Detalles adicionales proporcionados", default=None)
-    
-    # Para nueva incidencia
-    wants_new_incident: bool = Field(description="Si quiere abrir nueva incidencia", default=False)
-    same_location: Optional[bool] = Field(description="Si la nueva incidencia es en la misma ubicación", default=None)
-    new_store: Optional[str] = Field(description="Nueva tienda si cambió", default=None)
-    new_section: Optional[str] = Field(description="Nueva sección si cambió", default=None)
-    
-    # Respuesta
-    message_to_user: str = Field(description="Mensaje natural para el usuario")
-    needs_location_update: bool = Field(description="Si necesita actualizar ubicación", default=False)
+    """DEPRECATED - Usar ConfirmationDecision de utils.incident_helpers"""
+    pass
 
 
 # =============================================================================
@@ -139,23 +135,22 @@ class LLMDrivenClassifyNode(BaseNode):
     def _load_incident_types(self) -> Dict[str, Any]:
         """Cargar tipos de incidencia desde el archivo JSON"""
         try:
-            # Usar directamente el archivo JSON sin IncidentConfigLoader por ahora
-            json_path = Path("config/eroski_incidents.json")
-            if not json_path.exists():
-                json_path = Path("scripts/eroski_incidents.json")
+            # Usar directamente el archivo JSON
+            json_paths = [
+                Path("config/eroski_incidents.json"),
+                Path("scripts/eroski_incidents.json")
+            ]
             
-            if json_path.exists():
-                with open(json_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    
-                    # Verificar si usa la estructura "tipo_incidente" o "incident_types"
-                    if "tipo_incidente" in data:
-                        return data["tipo_incidente"]
-                    elif "incident_types" in data:
-                        return data["incident_types"]
-                    else:
-                        self.logger.warning("❌ Estructura de JSON no reconocida")
-                        return {}
+            for json_path in json_paths:
+                if json_path.exists():
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        
+                        # Verificar estructura
+                        if "tipo_incidente" in data:
+                            return data["tipo_incidente"]
+                        elif "incident_types" in data:
+                            return data["incident_types"]
                         
             self.logger.warning("❌ No se pudo cargar archivo de incidencias")
             return {}
@@ -562,7 +557,7 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos:
     
     def _generate_specific_questions(self, incident_type: str) -> str:
         """
-        Generar preguntas específicas basadas en los problemas disponibles en el archivo.
+        ✅ REFACTORIZADO: Generar preguntas específicas usando helper.
         
         Args:
             incident_type: Tipo de incidencia identificada
@@ -570,97 +565,33 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos:
         Returns:
             Mensaje con preguntas específicas dirigidas
         """
-        if incident_type not in self.incident_types:
-            return "¿Podrías describir el problema con más detalle?"
+        return self.solution_searcher.format_problems_for_user(incident_type)
+    
+    def _handle_confirmation_fallback(self, state: EroskiState) -> Command:
+        """Fallback para confirmación sin LLM"""
         
-        incident_data = self.incident_types[incident_type]
-        incident_name = incident_data.get("name", incident_type)
+        user_message = self._get_last_user_message(state).lower()
         
-        # Obtener problemas disponibles
-        available_problems = []
-        if "problemas" in incident_data:
-            available_problems = list(incident_data["problemas"].keys())
-        elif "common_issues" in incident_data:
-            available_problems = incident_data["common_issues"]
-        
-        if not available_problems:
-            return f"Necesito más información sobre el problema con {incident_name.lower()}. ¿Podrías ser más específico?"
-        
-        # Crear mensaje con opciones específicas
-        message = f"Entiendo que hay un problema con {incident_name.lower()}. "
-        
-        if len(available_problems) <= 6:
-            # Si hay pocas opciones, listarlas todas
-            message += "Según nuestro catálogo, los problemas más comunes son:\n\n"
-            for i, problem in enumerate(available_problems, 1):
-                message += f"• {problem}\n"
-            message += f"\n¿Cuál de estos describe mejor tu situación?"
+        # Interpretación básica
+        if any(word in user_message for word in ["sí", "si", "funcionó", "resuelto"]):
+            return Command(
+                update={
+                    "messages": state["messages"] + [AIMessage(content="Perfecto, problema resuelto.")],
+                    "current_step": "finalize",
+                    "conversation_ended": True
+                }
+            )
         else:
-            # Si hay muchas opciones, mostrar las más relevantes
-            message += "Para ayudarte mejor, ¿el problema es que:\n\n"
-            # Tomar las primeras 5-6 opciones más comunes
-            for i, problem in enumerate(available_problems[:6], 1):
-                message += f"• {problem}\n"
-            message += f"• Otro problema diferente\n"
-            message += f"\n¿Cuál de estas opciones se acerca más a tu situación?"
-        
-        return message
-    
-    def _should_generate_specific_questions(self, decision: ClassificationDecision, attempt_number: int) -> bool:
-        """
-        Determinar si se deben generar preguntas específicas basadas en el archivo.
-        
-        Args:
-            decision: Decisión del LLM
-            attempt_number: Número de intento
-            
-        Returns:
-            True si debe generar preguntas específicas
-        """
-        return (
-            decision.incident_identified and 
-            decision.incident_type and 
-            not decision.problem_identified and
-            attempt_number <= 3  # Solo en los primeros intentos
-        )
-    
-    def _generate_targeted_questions(self, state: EroskiState, decision: ClassificationDecision, attempt_number: int) -> Command:
-        """
-        Generar preguntas dirigidas basadas en los problemas disponibles en el archivo.
-        
-        Args:
-            state: Estado actual
-            decision: Decisión del LLM
-            attempt_number: Número de intento
-            
-        Returns:
-            Command con preguntas específicas
-        """
-        
-        # Generar mensaje con preguntas específicas
-        specific_message = self._generate_specific_questions(decision.incident_type)
-        
-        # Actualizar datos de clasificación
-        classify_data = state.get("classify_data", {})
-        classify_data.update({
-            "incident_type": decision.incident_type,
-            "incident_identified": True,
-            "specific_questions_generated": True,
-            "questions_source": "archivo_problemas"
-        })
-        
-        return Command(
-            update={
-                "messages": state["messages"] + [AIMessage(content=specific_message)],
-                "classify_data": classify_data,
-                "classify_attempt_number": attempt_number,
-                "current_step": "classify"
-            }
-        )
+            return Command(
+                update={
+                    "messages": state["messages"] + [AIMessage(content="Escalando a supervisor.")],
+                    "current_step": "escalate"
+                }
+            )
     
     def _try_auto_classify_from_file(self, state: EroskiState, decision: ClassificationDecision, attempt_number: int) -> Command:
         """
-        Intentar clasificar automáticamente usando el archivo cuando se conoce el tipo pero no el problema.
+        ✅ REFACTORIZADO: Intentar clasificar automáticamente usando helper.
         
         Args:
             state: Estado actual
@@ -680,14 +611,15 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos:
         # Combinar todos los mensajes del usuario
         combined_description = " ".join(user_messages)
         
-        # Buscar coincidencia en el archivo
-        problem_match, solution = self._find_best_matching_problem(
+        # ✅ REFACTORIZADO: Buscar coincidencia usando helper
+        problem_match, solution = self._find_solution_with_helpers(
             decision.incident_type, 
             combined_description
         )
         
         if problem_match and solution:
             # ¡Encontramos coincidencia! Proporcionar solución
+            incident_code = state.get("incident_code", "N/A")
             solution_message = f"""✅ **Incidencia Identificada: {decision.incident_type}**
 
 📋 **Problema:** {problem_match}
@@ -695,7 +627,9 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos:
 🔧 **Solución:**
 {solution}
 
-¿Esta solución resolvió tu problema? Si persiste o necesitas más ayuda, házmelo saber."""
+¿Esta solución resolvió tu problema? Si persiste o necesitas más ayuda, házmelo saber.
+
+📋 *Código de incidencia: {incident_code}*"""
             
             classify_data = state.get("classify_data", {})
             classify_data.update({
@@ -705,15 +639,24 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos:
                 "solution_source": "archivo_automatico",
                 "problem_identified": True,
                 "solution_ready": True,
-                "completed": True
+                "completed": False,
+                "awaiting_confirmation": True
+            })
+            
+            # ✅ REFACTORIZADO: Actualizar incidencia usando helper
+            self._update_incident_with_helpers(state, {
+                "tipo_incidencia": decision.incident_type,
+                "problema_especifico": problem_match,
+                "solucion_aplicada": solution,
+                "estado_solucion": "automatica"
             })
             
             return Command(
                 update={
                     "messages": state["messages"] + [AIMessage(content=solution_message)],
                     "classify_data": classify_data,
-                    "current_step": "search_solution",
-                    "classification_completed": True
+                    "current_step": "classify",
+                    "classification_completed": False  # Esperando confirmación
                 }
             )
         
@@ -969,10 +912,10 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos:
             if self._is_classification_complete(state):
                 return self._proceed_to_next_step(state)
             
-            # ✅ NUEVO: Generar código de incidencia al inicio
+            # ✅ REFACTORIZADO: Generar código de incidencia usando helper
             if not state.get("incident_code"):
-                incident_code = self._generate_incident_code()
-                self._initialize_incident_record(state, incident_code)
+                incident_code = self.code_manager.generate_unique_code()
+                self._initialize_incident_with_helpers(state, incident_code)
                 
                 # Actualizar estado con código
                 state = {**state, "incident_code": incident_code}
@@ -1195,31 +1138,73 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO:
                 }
             )
     
+    def _generate_targeted_questions(self, state: EroskiState, decision: ClassificationDecision, attempt_number: int) -> Command:
+        """
+        ✅ REFACTORIZADO: Generar preguntas dirigidas usando helper.
+        
+        Args:
+            state: Estado actual
+            decision: Decisión del LLM
+            attempt_number: Número de intento
+            
+        Returns:
+            Command con preguntas específicas
+        """
+        
+        # Generar mensaje con preguntas específicas usando helper
+        specific_message = self.solution_searcher.format_problems_for_user(decision.incident_type)
+        
+        # Actualizar datos de clasificación
+        classify_data = state.get("classify_data", {})
+        classify_data.update({
+            "incident_type": decision.incident_type,
+            "incident_identified": True,
+            "specific_questions_generated": True,
+            "questions_source": "archivo_problemas"
+        })
+        
+        return Command(
+            update={
+                "messages": state["messages"] + [AIMessage(content=specific_message)],
+                "classify_data": classify_data,
+                "classify_attempt_number": attempt_number,
+                "current_step": "classify"
+            }
+        )
+    
+    def _should_generate_specific_questions(self, decision: ClassificationDecision, attempt_number: int) -> bool:
+        """Determinar si se deben generar preguntas específicas"""
+        return (
+            decision.incident_identified and 
+            decision.incident_type and 
+            not decision.problem_identified and
+            attempt_number <= 3
+        )
+    
     def _provide_solution_and_complete(self, state: EroskiState, decision: ClassificationDecision) -> Command:
         """Proporcionar solución y completar clasificación"""
         
         classify_data = state.get("classify_data", {})
         incident_type = decision.incident_type or classify_data.get("incident_type")
         
-        # ✅ MEJORADO: Buscar solución en el archivo JSON primero
+        # ✅ REFACTORIZADO: Buscar solución usando helper
         solution_from_file = None
         problem_key_found = None
         
         if incident_type and decision.specific_problem:
-            problem_key_found, solution_from_file = self._find_best_matching_problem(
+            problem_key_found, solution_from_file = self._find_solution_with_helpers(
                 incident_type, decision.specific_problem
             )
         
-        # Si no encontramos en archivo, buscar por descripción general del usuario
+        # Si no encontramos, buscar por descripción general del usuario
         if not solution_from_file and incident_type:
-            # Obtener descripción del problema de todos los mensajes del usuario
             user_messages = []
             for msg in state.get("messages", []):
                 if isinstance(msg, HumanMessage):
                     user_messages.append(msg.content)
             
             combined_description = " ".join(user_messages)
-            problem_key_found, solution_from_file = self._find_best_matching_problem(
+            problem_key_found, solution_from_file = self._find_solution_with_helpers(
                 incident_type, combined_description
             )
         
@@ -1247,8 +1232,8 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO:
 
 📋 *Código de incidencia: {incident_code}*"""
         
-        # ✅ NUEVO: Actualizar registro de incidencia con solución
-        self._update_incident_record(state, {
+        # ✅ REFACTORIZADO: Actualizar registro usando helper
+        self._update_incident_with_helpers(state, {
             "tipo_incidencia": incident_type,
             "problema_especifico": problem_key_found or decision.specific_problem,
             "solucion_aplicada": final_solution,
@@ -1267,8 +1252,8 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO:
             "solution_provided": final_solution,
             "solution_source": solution_source,
             "confidence_level": decision.confidence_level,
-            "completed": False,  # ✅ CAMBIADO: No marcar como completo hasta confirmación
-            "awaiting_confirmation": True  # ✅ NUEVO: Esperando confirmación
+            "completed": False,  # No marcar como completo hasta confirmación
+            "awaiting_confirmation": True  # Esperando confirmación
         }
         
         return Command(
@@ -1276,8 +1261,8 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO:
                 "messages": state["messages"] + [AIMessage(content=solution_message)],
                 "classify_data": updated_classify_data,
                 "incident_type": incident_type,
-                "current_step": "classify",  # ✅ CAMBIADO: Mantener en classify para confirmación
-                "classification_completed": False  # ✅ CAMBIADO: No completar hasta confirmación
+                "current_step": "classify",  # Mantener en classify para confirmación
+                "classification_completed": False  # No completar hasta confirmación
             }
         )
     
@@ -1346,156 +1331,60 @@ Por favor, ten preparada la siguiente información:
         else:
             return "Tu consulta requiere atención especializada que está fuera de mi capacidad de resolución automática."
     
-    def _generate_incident_code(self) -> str:
+    def _initialize_incident_with_helpers(self, state: EroskiState, incident_code: str) -> None:
         """
-        ✅ NUEVO: Generar código único de incidencia (ER-0000).
-        
-        Returns:
-            Código único en formato ER-NNNN
-        """
-        
-        # Cargar códigos existentes para evitar duplicados
-        existing_codes = set()
-        if self.incidents_file.exists():
-            try:
-                with open(self.incidents_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    existing_codes = set(data.keys())
-            except Exception as e:
-                self.logger.warning(f"⚠️ Error leyendo archivo de incidencias: {e}")
-        
-        # Generar código único
-        max_attempts = 1000
-        for _ in range(max_attempts):
-            code = f"ER-{random.randint(1000, 9999)}"
-            if code not in existing_codes:
-                return code
-        
-        # Fallback si no se encuentra código único
-        return f"ER-{random.randint(10000, 99999)}"
-    
-    def _initialize_incident_record(self, state: EroskiState, incident_code: str) -> None:
-        """
-        ✅ NUEVO: Inicializar registro de incidencia en archivo JSON.
+        ✅ REFACTORIZADO: Inicializar incidencia usando helper de persistencia.
         
         Args:
             state: Estado actual
             incident_code: Código de la incidencia
         """
-        
-        auth_data = state.get("auth_data_collected", {})
-        
-        # Crear registro inicial
-        incident_record = {
-            "codigo_incidencia": incident_code,
-            "timestamp_creacion": datetime.now().isoformat(),
-            "estado": "abierta",
-            
-            # Datos obligatorios del empleado
-            "nombre_empleado": auth_data.get("name", ""),
-            "email_empleado": auth_data.get("email", ""),
-            "nombre_tienda": auth_data.get("store_name", ""),
-            "seccion": auth_data.get("section", ""),
-            
-            # Datos de la incidencia (se irán completando)
-            "tipo_incidencia": None,
-            "problema_especifico": None,
-            "solucion_aplicada": None,
-            "estado_solucion": None,
-            
-            # Registro de mensajes
-            "mensajes": []
-        }
-        
-        # Cargar archivo existente o crear nuevo
-        incidents_data = {}
-        if self.incidents_file.exists():
-            try:
-                with open(self.incidents_file, 'r', encoding='utf-8') as f:
-                    incidents_data = json.load(f)
-            except Exception as e:
-                self.logger.error(f"❌ Error leyendo archivo de incidencias: {e}")
-        
-        # Agregar nueva incidencia
-        incidents_data[incident_code] = incident_record
-        
-        # Guardar archivo
-        try:
-            with open(self.incidents_file, 'w', encoding='utf-8') as f:
-                json.dump(incidents_data, f, indent=2, ensure_ascii=False)
-            
-            self.logger.info(f"✅ Incidencia {incident_code} inicializada en archivo")
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error guardando archivo de incidencias: {e}")
+        success = self.persistence_manager.initialize_incident(state, incident_code)
+        if success:
+            self.logger.info(f"✅ Incidencia {incident_code} inicializada")
+        else:
+            self.logger.error(f"❌ Error inicializando incidencia {incident_code}")
     
-    def _update_incident_record(self, state: EroskiState, updates: dict) -> None:
+    def _update_incident_with_helpers(self, state: EroskiState, updates: dict) -> None:
         """
-        ✅ NUEVO: Actualizar registro de incidencia con nueva información.
+        ✅ REFACTORIZADO: Actualizar incidencia usando helper de persistencia.
         
         Args:
             state: Estado actual
             updates: Datos a actualizar
         """
-        
         incident_code = state.get("incident_code")
-        if not incident_code:
-            self.logger.warning("⚠️ No hay código de incidencia para actualizar")
-            return
-        
-        try:
-            # Cargar archivo
-            incidents_data = {}
-            if self.incidents_file.exists():
-                with open(self.incidents_file, 'r', encoding='utf-8') as f:
-                    incidents_data = json.load(f)
-            
-            # Actualizar registro
-            if incident_code in incidents_data:
-                incidents_data[incident_code].update(updates)
-                incidents_data[incident_code]["timestamp_actualizacion"] = datetime.now().isoformat()
-                
-                # Guardar
-                with open(self.incidents_file, 'w', encoding='utf-8') as f:
-                    json.dump(incidents_data, f, indent=2, ensure_ascii=False)
-                
-                self.logger.info(f"✅ Incidencia {incident_code} actualizada")
-            else:
-                self.logger.warning(f"⚠️ Incidencia {incident_code} no encontrada")
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error actualizando incidencia: {e}")
+        if incident_code:
+            success = self.persistence_manager.update_incident(incident_code, updates)
+            if not success:
+                self.logger.error(f"❌ Error actualizando incidencia {incident_code}")
     
-    def _save_messages_to_incident(self, state: EroskiState) -> None:
+    def _save_messages_with_helpers(self, state: EroskiState) -> None:
         """
-        ✅ NUEVO: Guardar todos los mensajes en el registro de incidencia.
+        ✅ REFACTORIZADO: Guardar mensajes usando helper de persistencia.
         
         Args:
             state: Estado actual
         """
-        
         incident_code = state.get("incident_code")
-        if not incident_code:
-            return
+        if incident_code:
+            messages = state.get("messages", [])
+            success = self.persistence_manager.save_messages(incident_code, messages)
+            if not success:
+                self.logger.error(f"❌ Error guardando mensajes para {incident_code}")
+    
+    def _find_solution_with_helpers(self, incident_type: str, problem_description: str) -> tuple[Optional[str], Optional[str]]:
+        """
+        ✅ REFACTORIZADO: Buscar solución usando helper especializado.
         
-        # Convertir mensajes a formato serializable
-        messages = []
-        for msg in state.get("messages", []):
-            if isinstance(msg, HumanMessage):
-                messages.append({
-                    "tipo": "usuario",
-                    "contenido": msg.content,
-                    "timestamp": datetime.now().isoformat()
-                })
-            elif isinstance(msg, AIMessage):
-                messages.append({
-                    "tipo": "bot",
-                    "contenido": msg.content,
-                    "timestamp": datetime.now().isoformat()
-                })
-        
-        # Actualizar registro
-        self._update_incident_record(state, {"mensajes": messages})
+        Args:
+            incident_type: Tipo de incidencia
+            problem_description: Descripción del problema
+            
+        Returns:
+            Tupla (problema_encontrado, solución)
+        """
+        return self.solution_searcher.find_best_solution(incident_type, problem_description)
     
     def _is_awaiting_confirmation(self, state: EroskiState) -> bool:
         """
@@ -1512,7 +1401,7 @@ Por favor, ten preparada la siguiente información:
     
     async def _handle_solution_confirmation(self, state: EroskiState) -> Command:
         """
-        ✅ MEJORADO: Manejar confirmación usando LLM para interpretación inteligente.
+        ✅ REFACTORIZADO: Manejar confirmación usando helper especializado.
         
         Args:
             state: Estado actual
@@ -1523,60 +1412,47 @@ Por favor, ten preparada la siguiente información:
         
         user_message = self._get_last_user_message(state)
         classify_data = state.get("classify_data", {})
-        auth_data = state.get("auth_data_collected", {})
         
-        # Preparar datos para el LLM de confirmación
-        prompt_input = {
-            "user_message": user_message,
-            "previous_solution": classify_data.get("solution_provided", ""),
-            "employee_name": auth_data.get("name", ""),
-            "store_name": auth_data.get("store_name", ""),
-            "section": auth_data.get("section", "")
-        }
-        
+        # ✅ REFACTORIZADO: Usar helper para interpretación
         try:
-            # Ejecutar análisis LLM
-            formatted_prompt = self.confirmation_prompt.format(**prompt_input)
-            response = await self.llm.ainvoke(formatted_prompt)
+            decision = await self.confirmation_handler.interpret_confirmation(
+                state=state,
+                user_message=user_message,
+                previous_solution=classify_data.get("solution_provided", "")
+            )
             
-            # Parsear respuesta
-            decision_data = self.confirmation_parser.parse(response.content)
-            decision = ClassifyConfirmationDecision(**decision_data)
+            self.logger.info(f"🤖 Interpretación: {decision.user_intent}")
             
-            self.logger.info(f"🤖 Interpretación confirmación: {decision.user_intent}")
-            
-            # Actualizar mensajes en el archivo
-            self._save_messages_to_incident(state)
+            # Actualizar mensajes en archivo
+            self._save_messages_with_helpers(state)
             
             # Procesar según la intención detectada
             if decision.user_intent == "solution_worked" or decision.solution_successful:
-                return await self._handle_successful_resolution(state, decision)
+                return await self._handle_successful_resolution_with_helpers(state, decision)
             
             elif decision.user_intent == "solution_failed":
-                return await self._handle_failed_solution(state, decision)
+                return await self._handle_failed_solution_with_helpers(state, decision)
             
             elif decision.user_intent == "new_incident" or decision.wants_new_incident:
-                return await self._handle_new_incident_request(state, decision)
+                return await self._handle_new_incident_with_helpers(state, decision)
             
             elif decision.user_intent == "needs_clarification":
-                return await self._handle_clarification_request(state, decision)
+                return self._ask_for_clarification_with_helpers(state, decision)
             
             else:
-                # Caso de incertidumbre - pedir clarificación
-                return self._ask_for_clarification(state, decision)
+                return self._ask_for_clarification_with_helpers(state, decision)
                 
         except Exception as e:
-            self.logger.error(f"❌ Error en interpretación LLM: {e}")
-            # Fallback a interpretación básica
+            self.logger.error(f"❌ Error en confirmación: {e}")
             return self._handle_confirmation_fallback(state)
     
-    async def _handle_successful_resolution(self, state: EroskiState, decision: ClassifyConfirmationDecision) -> Command:
-        """Manejar resolución exitosa"""
+    async def _handle_successful_resolution_with_helpers(self, state: EroskiState, decision: ConfirmationDecision) -> Command:
+        """✅ REFACTORIZADO: Manejar resolución exitosa con helpers"""
         
         incident_code = state.get("incident_code", "N/A")
         
-        # Actualizar registro de incidencia
-        self._update_incident_record(state, {
+        # Actualizar incidencia
+        self._update_incident_with_helpers(state, {
             "estado": "cerrada",
             "estado_solucion": "exitosa",
             "timestamp_cierre": datetime.now().isoformat(),
@@ -1607,14 +1483,14 @@ Si en el futuro tienes otra incidencia, no dudes en contactarme. ¡Que tengas un
             }
         )
     
-    async def _handle_failed_solution(self, state: EroskiState, decision: ClassifyConfirmationDecision) -> Command:
-        """Manejar solución fallida"""
+    async def _handle_failed_solution_with_helpers(self, state: EroskiState, decision: ConfirmationDecision) -> Command:
+        """✅ REFACTORIZADO: Manejar solución fallida con helpers"""
         
         incident_code = state.get("incident_code", "N/A")
         classify_data = state.get("classify_data", {})
         
-        # Actualizar registro de incidencia
-        self._update_incident_record(state, {
+        # Actualizar incidencia
+        self._update_incident_with_helpers(state, {
             "estado_solucion": "fallida",
             "detalles_fallo": decision.additional_details,
             "escalado_por": "solucion_fallida"
@@ -1639,6 +1515,102 @@ Un supervisor técnico te contactará pronto para resolver este caso específico
                 "current_step": "escalate",
                 "escalation_reason": "solution_failed",
                 "escalation_data": classify_data
+            }
+        )
+    
+    async def _handle_new_incident_with_helpers(self, state: EroskiState, decision: ConfirmationDecision) -> Command:
+        """✅ REFACTORIZADO: Manejar nueva incidencia con helpers"""
+        
+        # Cerrar incidencia actual
+        current_incident_code = state.get("incident_code", "N/A")
+        self._update_incident_with_helpers(state, {
+            "estado": "cerrada",
+            "estado_solucion": "nueva_incidencia_solicitada",
+            "timestamp_cierre": datetime.now().isoformat()
+        })
+        
+        if decision.needs_location_update:
+            # Pedir confirmación de ubicación
+            location_message = f"""📋 **Nueva Incidencia**
+
+Perfecto, voy a abrir una nueva incidencia para ti.
+
+¿La nueva incidencia es en la misma ubicación?
+- Tienda: {state.get('auth_data_collected', {}).get('store_name', 'N/A')}
+- Sección: {state.get('auth_data_collected', {}).get('section', 'N/A')}
+
+Responde "sí" si es la misma ubicación, o indícame la nueva tienda/sección.
+
+📋 *Incidencia anterior: {current_incident_code} (cerrada)*"""
+            
+            return Command(
+                update={
+                    "messages": state["messages"] + [AIMessage(content=location_message)],
+                    "classify_data": {"awaiting_location_confirmation": True},
+                    "current_step": "classify"
+                }
+            )
+        else:
+            # Crear nueva incidencia directamente
+            return await self._create_new_incident_with_helpers(state)
+    
+    async def _create_new_incident_with_helpers(self, state: EroskiState) -> Command:
+        """✅ REFACTORIZADO: Crear nueva incidencia con helpers"""
+        
+        # Guardar mensajes finales de incidencia actual
+        self._save_messages_with_helpers(state)
+        
+        # Generar nuevo código
+        new_incident_code = self.code_manager.generate_unique_code()
+        
+        # Inicializar nueva incidencia
+        self._initialize_incident_with_helpers(state, new_incident_code)
+        
+        new_incident_message = f"""🆕 **Nueva Incidencia Creada**
+
+He abierto una nueva incidencia para ti.
+
+📋 **Código de incidencia: {new_incident_code}**
+
+Por favor, describe el nuevo problema que necesitas reportar.
+
+💡 *Recuerda que tu código anterior era {state.get('incident_code', 'N/A')} por si necesitas consultarlo*"""
+        
+        # Resetear estado para nueva incidencia
+        return Command(
+            update={
+                "incident_code": new_incident_code,
+                "messages": [AIMessage(content=new_incident_message)],  # Resetear mensajes
+                "classify_data": {},
+                "classify_attempt_number": 0,
+                "classification_completed": False,
+                "current_step": "classify",
+                "conversation_ended": False,
+                "resolved": False
+            }
+        )
+    
+    def _ask_for_clarification_with_helpers(self, state: EroskiState, decision: ConfirmationDecision) -> Command:
+        """✅ REFACTORIZADO: Pedir clarificación con helpers"""
+        
+        clarification_message = f"""🤔 **Necesito Clarificación**
+
+{decision.message_to_user}
+
+Para ayudarte mejor, ¿podrías confirmar claramente?
+• ¿La solución funcionó y el problema se resolvió?
+• ¿El problema persiste y necesitas más ayuda?
+• ¿Quieres reportar un problema diferente?
+
+📋 *Código de incidencia: {state.get('incident_code', 'N/A')}*"""
+        
+        return Command(
+            update={
+                "messages": state["messages"] + [AIMessage(content=clarification_message)],
+                "classify_data": state.get("classify_data", {}),
+                "current_step": "classify"
+            }
+        )data": classify_data
             }
         )
     
