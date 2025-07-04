@@ -113,8 +113,16 @@ class LLMDrivenAuthenticateNode(BaseNode):
         
         self.logger.info(f"🧪 Estado inicial - auth_conversation_started: {state.get('auth_conversation_started')}")
 
+        """Ejecutar autenticación LLM-driven - CON DEBUG COMPLETO"""
+
         self.logger.info("🏅"*50)
         self.logger.info(f"🌄JGL entrando en {self.__class__.__name__}")
+        
+        # ✅ DEBUG: Ver estado de entrada
+        self.logger.info(f"📊 Estado de entrada: session_id={state.get('session_id')}")
+        self.logger.info(f"📊 Mensajes: {len(state.get('messages', []))}")
+        self.logger.info(f"📊 Auth data collected: {state.get('auth_data_collected', {})}")
+        
         collected_data = state.get("auth_data_collected", {})
         filled_fields = [k for k in self.required_fields if collected_data.get(k)]
         missing_fields = [k for k in self.required_fields if not collected_data.get(k)]
@@ -149,9 +157,20 @@ class LLMDrivenAuthenticateNode(BaseNode):
                     self.logger.warning(f"⚠️ Error analizando primer mensaje con LLM: {e}")
                     return await self._start_intelligent_conversation(state)
 
-            
             # 3. Continuar conversación dirigida por LLM
-            return await self._continue_llm_conversation(state)
+            result = await self._continue_llm_conversation(state)
+            self.logger.info("🔍 === RESULTADO DEL NODO ===")
+            if hasattr(result, 'update'):
+                update_data = result.update
+                self.logger.info(f"🔍 authentication_stage: {update_data.get('authentication_stage')}")
+                self.logger.info(f"🔍 datos_usuario_completos: {update_data.get('datos_usuario_completos')}")
+                self.logger.info(f"🔍 ready_for_classification: {update_data.get('ready_for_classification')}")
+                self.logger.info(f"🔍 awaiting_user_input: {update_data.get('awaiting_user_input')}")
+                self.logger.info(f"🔍 employee_name: {update_data.get('employee_name')}")
+                self.logger.info(f"🔍 incident_store_name: {update_data.get('incident_store_name')}")
+                self.logger.info(f"🔍 incident_section: {update_data.get('incident_section')}")
+            self.logger.info("🔍 === FIN RESULTADO ===")
+            return result
             
         except Exception as e:
             self.logger.error(f"❌ Error en autenticación LLM: {e}")
@@ -275,14 +294,20 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
         # Actualizar datos recopilados
         current_data = state.get("auth_data_collected", {})
         current_data.update(decision.extracted_data)
-        
+        # ✅ LOGGING PARA VER QUE DATOS TENEMOS
+        self.logger.info(f"🧠 Datos antes de procesar: {current_data}")
+        self.logger.info(f"🎯 Acción decidida: {decision.next_action}")
+        self.logger.info(f"📧 Email detectado: {decision.email_detected}")
         base_update = {
             "auth_data_collected": current_data,
             "attempts": state.get("attempts", 0) + 1,
             "last_activity": datetime.now(),
             "messages": state.get("messages", []) + [AIMessage(content=decision.message_to_user)]
         }
-        
+        # ✅ VERIFICAR SI TENEMOS TODOS LOS DATOS NECESARIOS ANTES DE PROCESAR
+        has_all_required_data = all(current_data.get(field) for field in ["name", "email", "store_name", "section"])
+        self.logger.info(f"🔍 ¿Tiene todos los datos requeridos? {has_all_required_data}")
+        self.logger.info(f"🔍 Datos: name={bool(current_data.get('name'))}, email={bool(current_data.get('email'))}, store={bool(current_data.get('store_name'))}, section={bool(current_data.get('section'))}")
         # Ejecutar acción específica
         if decision.wants_to_cancel:
             return await self._handle_cancellation(state, decision)
@@ -296,14 +321,74 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
             return await self._search_database_and_continue(state, decision, base_update)
             
         elif decision.next_action == "complete":
-            return self._complete_authentication(state, decision, base_update)
+                # LLM dice que está completo, verificar si realmente lo está
+                if has_all_required_data:
+                    return self._complete_authentication_immediately(state, current_data, base_update)
+                else:
+                    self.logger.warning("⚠️ LLM dice 'complete' pero faltan datos")
+                    return self._continue_data_collection(state, decision, base_update)
             
         elif decision.next_action == "collect_data":
             return self._continue_data_collection(state, decision, base_update)
             
         else:  # clarify or unknown
             return self._request_clarification(state, decision, base_update)
-    
+
+    def _complete_authentication_immediately(self, state: EroskiState, current_data: Dict, base_update: Dict) -> Command:
+        """Completar autenticación inmediatamente cuando tenemos todos los datos"""
+        
+        self.logger.info("🚀 === COMPLETANDO AUTENTICACIÓN INMEDIATAMENTE ===")
+        self.logger.info(f"📊 Datos completos: {current_data}")
+        
+        # Mensaje de confirmación
+        confirmation_message = f"""✅ **¡Información recopilada correctamente!**
+
+    👤 **Empleado:** {current_data.get('name')}
+    📧 **Email:** {current_data.get('email')}
+    🏪 **Tienda:** {current_data.get('store_name')}
+    📍 **Sección:** {current_data.get('section')}
+
+    Ahora cuéntame: **¿qué problema técnico estás experimentando?** 🔧"""
+        
+        # ✅ CONFIGURAR TODOS LOS CAMPOS REQUERIDOS POR EL ROUTER
+        complete_update = {
+            **base_update,  # Incluir datos base
+            
+            # ✅ CAMPOS CRÍTICOS PARA EL ROUTER
+            "authentication_stage": "completed",
+            "datos_usuario_completos": True,
+            "ready_for_classification": True,
+            "awaiting_user_input": False,  # ✅ CRÍTICO - NO esperar input
+            
+            # ✅ CAMPOS DE EMPLEADO REQUERIDOS
+            "employee_name": current_data.get('name'),
+            "incident_store_name": current_data.get('store_name'),
+            "incident_section": current_data.get('section'),
+            "incident_email": current_data.get('email'),
+            
+            # ✅ CAMPOS ADICIONALES
+            "authenticated": True,
+            "found_in_database": False,  # Asumimos manual por defecto
+            "current_node": "authenticate",
+            
+            # ✅ SOBRESCRIBIR MENSAJE
+            "messages": state.get("messages", []) + [AIMessage(content=confirmation_message)]
+        }
+        
+        # ✅ LOGGING PARA VERIFICAR QUE SE CONFIGURAN TODOS LOS CAMPOS
+        self.logger.info("✅ === CONFIGURANDO ESTADO COMPLETO ===")
+        self.logger.info(f"✅ authentication_stage: {complete_update['authentication_stage']}")
+        self.logger.info(f"✅ datos_usuario_completos: {complete_update['datos_usuario_completos']}")
+        self.logger.info(f"✅ ready_for_classification: {complete_update['ready_for_classification']}")
+        self.logger.info(f"✅ awaiting_user_input: {complete_update['awaiting_user_input']}")
+        self.logger.info(f"✅ employee_name: {complete_update['employee_name']}")
+        self.logger.info(f"✅ incident_store_name: {complete_update['incident_store_name']}")
+        self.logger.info(f"✅ incident_section: {complete_update['incident_section']}")
+        self.logger.info("✅ === FIN CONFIGURACIÓN ESTADO ===")
+        
+        return Command(update=complete_update)
+
+
     # =========================================================================
     # ACCIONES ESPECÍFICAS
     # =========================================================================
@@ -1192,17 +1277,47 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos definidos (aun
 # FUNCIÓN PARA CREAR INSTANCIA
 # =============================================================================
 
-async def llm_driven_authenticate_node(state: EroskiState) -> Command:
-    """
-    Crear instancia del nodo de autenticación LLM-driven.
-    
-    Returns:
-        Instancia configurada del nodo
-    """
-    node = LLMDrivenAuthenticateNode()
-    command = await node.execute(state)
-    state.update(command.update)
-    return state
+#async def llm_driven_authenticate_node(state: EroskiState) -> Command:
+#    """
+#    Crear instancia del nodo de autenticación LLM-driven.
+#    
+#    Returns:
+#        Instancia configurada del nodo
+#    node = LLMDrivenAuthenticateNode()
+#    return node
+#    """
+#    node = LLMDrivenAuthenticateNode()
+#    command = await node.execute(state)
+#    state.update(command.update)
+#    return state
+
+    async def llm_driven_authenticate_node(state: EroskiState) -> EroskiState:
+        """
+        Función wrapper para LangGraph - VERSIÓN CORREGIDA
+        
+        LangGraph espera que los nodos:
+        1. Reciban el estado como dict
+        2. Retornen el estado actualizado como dict
+        """
+        
+        # Crear instancia del nodo
+        node = LLMDrivenAuthenticateNode()
+        
+        # Ejecutar el nodo (retorna Command)
+        command = await node.execute(state)
+        
+        # ✅ APLICAR LAS ACTUALIZACIONES AL ESTADO
+        updated_state = {**state, **command.update}
+        
+        # ✅ LOGGING PARA VERIFICAR QUE SE ACTUALIZA
+        logging.getLogger("Node.authenticate").info("🔍 === ACTUALIZACIONES APLICADAS ===")
+        for key, value in command.update.items():
+            logging.getLogger("Node.authenticate").info(f"🔧 {key}: {value}")
+        logging.getLogger("Node.authenticate").info("🔍 === FIN ACTUALIZACIONES ===")
+        
+        # ✅ RETORNAR ESTADO ACTUALIZADO (dict)
+        return updated_state
+
     #command = await node.execute(state)
     #return {**state, **command.update}
 
