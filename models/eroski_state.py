@@ -105,6 +105,7 @@ class EroskiState(TypedDict, total=False):
     affected_equipment: Optional[str]       # Equipo afectado
     error_codes: Optional[List[str]]        # Códigos de error reportados
     incident_location: Optional[str]        # Ubicación específica en tienda
+    aditional_info: Optional[str]           # Información adicional sobre el problem
     
     # ========== BÚSQUEDA DE SOLUCIÓN ==========
     solution_found: bool                    # Si se encontró solución

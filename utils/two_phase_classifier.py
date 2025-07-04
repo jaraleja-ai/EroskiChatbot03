@@ -541,33 +541,3 @@ async def execute_two_phase_classification(state: EroskiState) -> Command:
     
     classifier = TwoPhaseClassifier()
     return await classifier.classify_incident(state)
-
-# =============================================================================
-# EJEMPLO DE USO EN EL NODO CLASSIFY
-# =============================================================================
-
-# En nodes/classify_llm_driven.py, reemplazar el método principal por:
-
-async def execute(self, state: EroskiState) -> Command:
-    """
-    Ejecutar clasificación usando el sistema de dos fases
-    """
-    
-    self.logger.info("🚀 Iniciando clasificación en dos fases")
-    
-    try:
-        # Generar código de incidencia si no existe
-        if not state.get("incident_code"):
-            incident_code = self.code_manager.generate_unique_code()
-            state = {**state, "incident_code": incident_code}
-            self._initialize_incident_with_helpers(state, incident_code)
-        
-        # Ejecutar clasificación en dos fases
-        return await execute_two_phase_classification(state)
-        
-    except Exception as e:
-        self.logger.error(f"❌ Error en clasificación dos fases: {e}")
-        return self._handle_error(state, str(e))
-
-
-        

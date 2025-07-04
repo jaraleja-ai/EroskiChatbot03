@@ -29,6 +29,7 @@ from pathlib import Path
 from models.eroski_state import EroskiState
 from nodes.base_node import BaseNode
 from utils.llm.providers import get_llm
+from utils.two_phase_classifier import execute_two_phase_classification
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
@@ -45,6 +46,8 @@ from utils.incident_helpers import (
     ConfirmationDecision
 )
 
+# Eliminar todos los handlers del root logger
+logging.basicConfig(level=logging.WARNING)  # Solo muestra warning, error y critical
 
 # =============================================================================
 # MODELOS DE DATOS
@@ -221,76 +224,143 @@ class LLMDrivenClassifyNode(BaseNode):
             return {}
     
     def _build_classification_prompt(self) -> PromptTemplate:
-        """Construir prompt principal para clasificación LLM-driven"""
+        """
+        ✅ PROMPT CORREGIDO: Elimina bucles y fuerza soluciones directas
+        """
         return PromptTemplate(
-            template="""Eres un asistente experto en clasificación de incidencias técnicas para Eroski.
+            template="""Eres un experto en clasificación de incidencias técnicas para Eroski.
 
-Tu misión es analizar los mensajes del usuario para:
-1. IDENTIFICAR si describe una incidencia técnica
-2. CLASIFICAR el tipo de incidencia usando las categorías disponibles
-3. DETECTAR el problema específico dentro de ese tipo
-4. PROPONER una solución si la conoces
-5. HACER PREGUNTAS inteligentes si necesitas más información
-6. ESCALAR a supervisor si no puedes identificar la incidencia
+    🎯 MISIÓN: RESOLVER problemas técnicos de forma DIRECTA y EFICIENTE.
 
-TIPOS DE INCIDENCIAS DISPONIBLES:
-{incident_types_info}
+    🚨 REGLAS CRÍTICAS - CUMPLIR OBLIGATORIAMENTE:
 
-HISTORIAL COMPLETO DE MENSAJES DEL USUARIO:
-{conversation_history}
+    1️⃣ **SI IDENTIFICASTE TIPO + PROBLEMA → PROPORCIONA SOLUCIÓN INMEDIATAMENTE**
+    - NO digas "vamos a verificar" 
+    - NO digas "procederemos a buscar"
+    - NO digas "estamos verificando"
+    - DI LA SOLUCIÓN PASO A PASO del catálogo
 
-DATOS DEL EMPLEADO AUTENTICADO:
-- Nombre: {employee_name}
-- Tienda: {store_name}
-- Sección: {section}
+    2️⃣ **USA LAS SOLUCIONES EXACTAS DEL CATÁLOGO**
+    - Si usuario dice "etiquetas" y trabajas en carnicería → "balanza no imprime etiquetas" → DAR SOLUCIÓN
+    - Si usuario dice "calibración" → "error de calibración" → DAR SOLUCIÓN  
+    - Si usuario dice "no enciende" → buscar en el tipo → DAR SOLUCIÓN
 
-ESTADO ACTUAL DE CLASIFICACIÓN:
-- Intentos realizados: {attempt_number}
-- Tipo identificado anteriormente: {previous_incident_type}
-- Problema identificado: {previous_problem}
+    3️⃣ **MÁXIMO 2 INTERCAMBIOS PARA RESOLVER**
+    - Intercambio 1: Identificar problema específico
+    - Intercambio 2: Dar solución completa
+    - NO más vueltas innecesarias
 
-ÚLTIMO MENSAJE DEL USUARIO:
-"{user_message}"
+    TIPOS DE INCIDENCIAS DISPONIBLES:
+    {incident_types_info}
 
-INSTRUCCIONES PARA TU ANÁLISIS:
+    DATOS DEL EMPLEADO AUTENTICADO:
+    - Nombre: {employee_name}
+    - Tienda: {store_name}
+    - Sección: {section}
 
-1. **ANALIZAR TODO EL HISTORIAL**: No solo el último mensaje, sino toda la conversación
-2. **IDENTIFICAR KEYWORDS**: Busca palabras clave que coincidan con los tipos de incidencia
-3. **EVALUAR CONTEXTO**: Considera la sección del empleado (ej: si está en "Caja" y habla de problemas, probablemente sea TPV)
-4. **SER ESPECÍFICO**: No te conformes con identificar solo el tipo, busca el problema exacto
-5. **PROPONER SOLUCIONES**: Si identificas el problema específico, proporciona la solución correspondiente
-6. **HACER PREGUNTAS INTELIGENTES**: Si falta información, haz preguntas específicas y útiles
-7. **ESCALAR CUANDO SEA NECESARIO**: Si después de varios intentos no puedes clasificar, escala
+    HISTORIAL COMPLETO DE MENSAJES:
+    {conversation_history}
 
-CRITERIOS DE ESCALACIÓN:
-- Han pasado más de 5 intentos sin identificar claramente la incidencia
-- El usuario describe algo que no está en ninguna categoría
-- El problema parece muy técnico o complejo
-- El usuario está frustrado o pide hablar con un supervisor
+    ESTADO ACTUAL:
+    - Intentos realizados: {attempt_number}
+    - Tipo identificado: {previous_incident_type}
+    - Problema identificado: {previous_problem}
 
-RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos:
-{{
-    "incident_identified": false,
+    ÚLTIMO MENSAJE DEL USUARIO:
+    "{user_message}"
+
+    🔍 ANÁLISIS OBLIGATORIO:
+
+    **PASO 1: ¿Ya tienes tipo + problema específico?**
+    - SI → next_action: "provide_solution" + dar solución completa del catálogo
+    - NO → continuar al paso 2
+
+    **PASO 2: ¿Tienes el tipo pero problema vago?**
+    - SI → next_action: "ask_specific_questions" + listar problemas específicos del catálogo
+    - NO → continuar al paso 3
+
+    **PASO 3: ¿No tienes ni el tipo?**
+    - SI → next_action: "ask_general_questions" + preguntar qué equipo
+    - Escalación solo después de 6+ intentos fallidos
+
+    ✅ **EJEMPLOS DE RESPUESTAS CORRECTAS:**
+
+    **Ejemplo A - Usuario dice "lo de las etiquetas" (PROBLEMA IDENTIFICADO):**
+    ```json
+    {{
+    "incident_identified": true,
+    "problem_identified": true,
+    "solution_ready": true,
+    "incident_type": "balanza",
+    "specific_problem": "La balanza no imprime etiquetas",
+    "proposed_solution": "1. Verificar que hay papel en el compartimento\n2. Abrir la tapa y revisar que el papel esté bien colocado\n3. Limpiar el cabezal de impresión con alcohol\n4. Reiniciar la balanza\n5. Probar imprimiendo una etiqueta de prueba",
+    "confidence_level": 0.95,
+    "next_action": "provide_solution",
+    "message_to_user": "✅ **Problema identificado: Balanza no imprime etiquetas**\n\n🔧 **Solución paso a paso:**\n1. Verificar que hay papel en el compartimento\n2. Abrir la tapa y revisar que el papel esté bien colocado\n3. Limpiar el cabezal de impresión con alcohol\n4. Reiniciar la balanza\n5. Probar imprimiendo una etiqueta de prueba\n\n🤔 **¿Quieres intentar esta solución?**\n• Responde 'sí' para que te guíe paso a paso\n• Responde 'no entiendo' si necesitas más explicación",
+    "keywords_detected": ["etiquetas", "balanza"]
+    }}
+    ```
+
+    **Ejemplo B - Usuario dice "balanza va mal" (TIPO IDENTIFICADO, PROBLEMA VAGO):**
+    ```json
+    {{
+    "incident_identified": true,
     "problem_identified": false,
     "solution_ready": false,
-    "needs_escalation": false,
-    "wants_to_cancel": false,
-    "incident_type": null,
-    "specific_problem": null,
-    "proposed_solution": null,
-    "confidence_level": 0.0,
-    "next_action": "ask_questions",
-    "message_to_user": "Mensaje natural aquí",
-    "questions_to_ask": [],
-    "keywords_detected": [],
-    "urgency_level": 2
-}}
+    "incident_type": "balanza",
+    "confidence_level": 0.8,
+    "next_action": "ask_specific_questions",
+    "message_to_user": "He identificado que el problema es con la BALANZA. Para darte la solución exacta, ¿cuál de estos problemas tienes?\n\n1️⃣ **No imprime etiquetas**\n2️⃣ **El peso mostrado es incorrecto**\n3️⃣ **Error de calibración**\n4️⃣ **La balanza no enciende**\n5️⃣ **La pantalla no responde**\n6️⃣ **Las etiquetas salen en blanco**\n\nResponde el número o describe tu problema específico:",
+    "keywords_detected": ["balanza"]
+    }}
+    ```
 
-⚠️ IMPORTANTE: No uses formato Markdown. Solo responde con JSON puro, sin símbolos adicionales.
-""",
+    ❌ **PROHIBIDO HACER (EJEMPLOS DE LO QUE NO DEBES DECIR):**
+    - "Vamos a verificar cómo podemos solucionarlo" → MUY VAGO
+    - "Procederemos a buscar una solución" → DAR LA SOLUCIÓN YA
+    - "Estamos verificando cómo resolverlo" → NO VERIFICAR, RESOLVER
+    - "Entendido, parece que..." → SER DIRECTO
+    - "Hemos identificado que..." → DAR LA SOLUCIÓN INMEDIATAMENTE
+
+    ✅ **EN SU LUGAR DI:**
+    - "✅ **Problema identificado: [PROBLEMA]**\n\n🔧 **Solución paso a paso:**\n1. [PASO]\n2. [PASO]..."
+    - "He identificado que el problema es con [EQUIPO]. Para darte la solución exacta, ¿cuál de estos problemas tienes? 1️⃣ [OPCIÓN] 2️⃣ [OPCIÓN]..."
+
+    🚨 CRITERIOS DE ESCALACIÓN (SOLO en estos casos):
+    - Han pasado más de 6 intentos sin identificar claramente la incidencia
+    - El usuario describe algo que NO está en ninguna categoría del catálogo
+    - El usuario EXPLÍCITAMENTE pide hablar con un supervisor
+    - Tu confianza es menor a 0.3 después de múltiples intentos
+
+    ✅ NO ESCALES SI:
+    - Tienes alta confianza (>= 0.7)
+    - Ya identificaste el problema
+    - Tienes la solución del catálogo
+    - El usuario está cooperando
+
+    RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos:
+    {{
+        "incident_identified": false,
+        "problem_identified": false,
+        "solution_ready": false,
+        "needs_escalation": false,
+        "wants_to_cancel": false,
+        "incident_type": null,
+        "specific_problem": null,
+        "proposed_solution": null,
+        "confidence_level": 0.0,
+        "next_action": "ask_questions",
+        "message_to_user": "Mensaje natural aquí",
+        "questions_to_ask": [],
+        "keywords_detected": [],
+        "urgency_level": 2
+    }}
+
+    ⚠️ IMPORTANTE: No uses formato Markdown en JSON. Solo responde con JSON puro.""",
             input_variables=[
                 "incident_types_info", "conversation_history", "employee_name", 
-                "store_name", "section"
+                "store_name", "section", "attempt_number", "previous_incident_type",
+                "previous_problem", "user_message"
             ]
         )
     
@@ -945,67 +1015,28 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos:
                 return msg.content
         
         return ""
-    
+
     async def execute(self, state: EroskiState) -> Command:
         """
-        Ejecutar clasificación LLM-driven.
-        
-        Args:
-            state: Estado actual del workflow
-            
-        Returns:
-            Command con la siguiente acción
+        Ejecutar clasificación usando el sistema de dos fases
         """
         
-        self.logger.info("🏅" * 50)
-        self.logger.info(f"🌄 Entrando en clasificación LLM-driven")
+        self.logger.info("🚀 Iniciando clasificación en dos fases")
         
         try:
-            self.logger.info("🔍 Iniciando clasificación de incidencia")
-            
-            # 1. Verificar si ya está completo
-            if self._is_classification_complete(state):
-                return self._proceed_to_next_step(state)
-            
-            # ✅ REFACTORIZADO: Generar código de incidencia usando helper
+            # Generar código de incidencia si no existe
             if not state.get("incident_code"):
                 incident_code = self.code_manager.generate_unique_code()
-                self._initialize_incident_with_helpers(state, incident_code)
-                
-                # Actualizar estado con código
                 state = {**state, "incident_code": incident_code}
-                self.logger.info(f"✅ Código de incidencia generado: {incident_code}")
+                self._initialize_incident_with_helpers(state, incident_code)
             
-            # 2. Preparar datos
-            attempt_number = state.get("classify_attempt_number", 0) + 1
-            
-            # ✅ NUEVO: Verificar si está esperando confirmación de solución
-            if self._is_awaiting_confirmation(state):
-                return await self._handle_solution_confirmation(state)
-            
-            # 3. ✅ NUEVA FUNCIONALIDAD: Análisis inicial del historial
-            if attempt_number == 1:
-                self.logger.info("🔍 Primera visita: analizando historial completo")
-                return await self._analyze_historical_messages(state)
-            
-            # 4. Verificar escalación
-            if self._should_escalate(state, attempt_number):
-                return self._escalate_to_supervisor(state)
-            
-            # 5. Verificar cancelación
-            if self._wants_to_cancel(state):
-                return self._handle_cancellation(state)
-            
-            # 6. Ejecutar análisis LLM
-            decision = await self._analyze_with_llm(state, attempt_number)
-            
-            # 7. Procesar decisión
-            return await self._process_llm_decision(state, decision, attempt_number)
+            # Ejecutar clasificación en dos fases
+            return await execute_two_phase_classification(state)
             
         except Exception as e:
-            self.logger.error(f"❌ Error en clasificación: {e}")
+            self.logger.error(f"❌ Error en clasificación dos fases: {e}")
             return self._handle_error(state, str(e))
-    
+
     async def _analyze_with_llm(self, state: EroskiState, attempt_number: int) -> ClassificationDecision:
         """Analizar con LLM para tomar decisión (para intentos posteriores al primero)"""
         
