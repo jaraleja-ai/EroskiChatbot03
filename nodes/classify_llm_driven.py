@@ -32,6 +32,8 @@ from utils.llm.providers import get_llm
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
+from config.incident_config import IncidentConfigLoader
+
 
 # ✅ NUEVO: Importar helpers especializados
 from utils.incident_helpers import (
@@ -110,6 +112,19 @@ class LLMDrivenClassifyNode(BaseNode):
         self.incident_loader = IncidentConfigLoader()
         self.incident_types = self._load_incident_types()
         
+    # ✅ NUEVO: Archivo de incidencias ANTES de inicializar helpers
+        self.incidents_file = Path("incidents_database.json")
+
+        # ✅ ORDEN CORRECTO: PRIMERO inicializar helpers
+        self.helpers = {}
+        self._initialize_helpers()
+
+        # ✅ CREAR REFERENCIAS DIRECTAS A HELPERS
+        self.code_manager = self.helpers.get("code_manager")
+        self.solution_searcher = self.helpers.get("solution_searcher") 
+        self.confirmation_handler = self.helpers.get("confirmation_handler")
+        self.persistence_manager = self.helpers.get("persistence_manager")
+        
         # Parser para decisiones LLM
         self.parser = JsonOutputParser(pydantic_object=ClassificationDecision)
         self.confirmation_parser = JsonOutputParser(pydantic_object=ClassifyConfirmationDecision)
@@ -125,7 +140,52 @@ class LLMDrivenClassifyNode(BaseNode):
         
         # ✅ NUEVO: Archivo de incidencias
         self.incidents_file = Path("incidents_database.json")
+
         
+    def _initialize_helpers(self):
+        """
+        ✅ NUEVO MÉTODO: Inicializar todos los helpers usando la factory
+        """
+        try:
+            # Crear helpers usando factory
+            self.helpers = IncidentHelpersFactory.create_all_helpers(
+                incident_types=self.incident_types,
+                incidents_file=self.incidents_file
+            )
+            
+            self.logger.info(f"✅ Helpers inicializados: {list(self.helpers.keys())}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error inicializando helpers: {e}")
+            # Crear helpers individuales como fallback
+            self._create_fallback_helpers()
+
+    def _create_fallback_helpers(self):
+        """
+        ✅ NUEVO MÉTODO: Crear helpers individuales si falla la factory
+        """
+        try:
+            self.helpers = {
+                "code_manager": IncidentCodeManager(self.incidents_file),
+                "solution_searcher": SolutionSearcher(self.incident_types),
+                "confirmation_handler": ConfirmationLLMHandler(),
+                "persistence_manager": IncidentPersistence(self.incidents_file)
+            }
+            
+            self.logger.info("✅ Helpers fallback creados")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error en helpers fallback: {e}")
+            # Crear helpers mínimos para evitar errores
+            self.helpers = {
+                "code_manager": None,
+                "solution_searcher": None,
+                "confirmation_handler": None,
+                "persistence_manager": None
+            }
+
+
+
     def get_required_fields(self) -> List[str]:
         return ["messages", "authenticated"]
     
@@ -291,12 +351,6 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO:
 }}""",
             input_variables=[
                 "user_message", "previous_solution", "employee_name", "store_name", "section"
-            ]
-        )
-""",
-            input_variables=[
-                "incident_types_info", "conversation_history", "employee_name", 
-                "store_name", "section"
             ]
         )
     
@@ -969,7 +1023,8 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos:
             "attempt_number": attempt_number,
             "previous_incident_type": classify_data.get("incident_type"),
             "previous_problem": classify_data.get("specific_problem"),
-            "user_message": user_message
+            "user_message": user_message,
+                "previous_confidence": classify_data.get("confidence_level", 0.0) 
         }
         
         # Usar un prompt más avanzado para intentos continuos
@@ -1048,7 +1103,7 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO:
         )
         
         # Ejecutar LLM
-        formatted_prompt = simple_prompt.format(**prompt_input)
+        formatted_prompt = continuous_prompt.format(**prompt_input)
         
         self.logger.info(f"🤖 Ejecutando análisis LLM continuo (intento {attempt_number})")
         
@@ -1609,8 +1664,6 @@ Para ayudarte mejor, ¿podrías confirmar claramente?
                 "messages": state["messages"] + [AIMessage(content=clarification_message)],
                 "classify_data": state.get("classify_data", {}),
                 "current_step": "classify"
-            }
-        )data": classify_data
             }
         )
     
