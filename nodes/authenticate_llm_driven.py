@@ -307,83 +307,232 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
     # =========================================================================
     # ACCIONES ESPECÍFICAS
     # =========================================================================
-    
     async def _search_database_and_continue(self, state: EroskiState, decision: ConversationDecision, base_update: Dict) -> Command:
-        """Buscar en BD y continuar - VERSIÓN CORREGIDA"""
+        """Buscar en BD y continuar - MANEJO ROBUSTO DE NO ENCONTRADOS"""
         
         email = decision.extracted_data.get("email")
         self.logger.info(f"🔍 Ejecutando búsqueda en BD para: {email}")
         
-        try:
-            db_result = await self._search_employee_database(email)
+        # 1. BUSCAR EN BASE DE DATOS
+        db_result = await self._search_employee_database(email)
+        
+        if db_result.get("found"):
+            # ✅ CASO 1: USUARIO ENCONTRADO EN BD
+            return await self._handle_user_found_in_db(state, decision, base_update, db_result)
+        
+        elif db_result.get("is_error"):
+            # ✅ CASO 2: ERROR TÉCNICO EN BD
+            return await self._handle_database_technical_error(state, decision, base_update, db_result)
+        
+        else:
+            # ✅ CASO 3: EMAIL NO REGISTRADO (CASO NORMAL)
+            return await self._handle_email_not_registered(state, decision, base_update, db_result)
+
+    async def _handle_database_technical_error(self, state: EroskiState, decision: ConversationDecision, base_update: Dict, db_result: Dict) -> Command:
+        """Manejar error técnico de base de datos"""
+        
+        error = db_result.get("error", "Error desconocido")
+        email = db_result.get("email")
+        
+        self.logger.error(f"❌ Error técnico en BD para {email}: {error}")
+        
+        # ✅ INTENTAR COMPLETAR CON DATOS MANUALES SI LOS TENEMOS
+        current_data = base_update["auth_data_collected"]
+        has_all_data = all(current_data.get(field) for field in ["name", "email", "store_name", "section"])
+        
+        if has_all_data:
+            self.logger.info("✅ Error en BD pero tenemos todos los datos, completando manualmente")
             
-            if db_result.get("found"):
-                employee = db_result["employee"]
-                self.logger.info(f"✅ Usuario encontrado en BD: {employee.get('name')}")
-                
-                success_message = f"""✅ **¡Perfecto {employee.get('name', 'usuario')}!** Te he encontrado en el sistema.
+            error_message = f"""Ha ocurrido un problema técnico al verificar tu email, pero ya tengo toda tu información necesaria. 👍
+
+    **Datos registrados:**
+    👤 **Empleado:** {current_data.get('name')}
+    📧 **Email:** {current_data.get('email')}
+    🏪 **Tienda:** {current_data.get('store_name')}
+    📍 **Sección:** {current_data.get('section')}
+
+    ¡Continuemos! **¿Qué problema técnico estás experimentando?** 🔧"""
+            
+            # Completar autenticación a pesar del error
+            base_update.update({
+                "authentication_stage": "completed",
+                "datos_usuario_completos": True,
+                "ready_for_classification": True,
+                "awaiting_user_input": False,  # ✅ CONTINUAR
+                "employee_name": current_data.get('name'),
+                "incident_store_name": current_data.get('store_name'),
+                "incident_section": current_data.get('section'),
+                "incident_email": current_data.get('email'),
+                "found_in_database": False,
+                "database_error": error,
+                "authenticated": True,
+                "messages": state.get("messages", []) + [AIMessage(content=error_message)]
+            })
+            
+            return Command(update=base_update)
+        
+        else:
+            # Error y no tenemos datos suficientes
+            error_message = f"""Ha ocurrido un error técnico al verificar tu email. 😔
+
+    Para continuar, necesito que me proporciones manualmente:
+    🔹 **Tu nombre completo**
+    🔹 **Nombre de tu tienda**
+    🔹 **Sección donde trabajas**
+
+    **Ejemplo:** "Soy Juan García, trabajo en Eroski Bilbao Centro en carnicería" """
+            
+            base_update.update({
+                "awaiting_user_input": True,
+                "database_error": error,
+                "messages": state.get("messages", []) + [AIMessage(content=error_message)]
+            })
+            
+            return Command(update=base_update)
+
+    async def _handle_email_not_registered(self, state: EroskiState, decision: ConversationDecision, base_update: Dict, db_result: Dict) -> Command:
+        """Manejar email no registrado en BD (CASO NORMAL)"""
+        
+        email = db_result.get("email")
+        self.logger.info(f"📄 Email no registrado en BD: {email} - Continuando con datos manuales")
+        
+        # ✅ VERIFICAR SI TENEMOS TODOS LOS DATOS NECESARIOS
+        current_data = base_update["auth_data_collected"]
+        
+        has_name = bool(current_data.get("name"))
+        has_store = bool(current_data.get("store_name"))
+        has_section = bool(current_data.get("section"))
+        has_email = bool(current_data.get("email"))
+        
+        self.logger.info(f"📋 Verificando datos - Nombre: {has_name}, Tienda: {has_store}, Sección: {has_section}, Email: {has_email}")
+        
+        if has_name and has_store and has_section and has_email:
+            # ✅ TENEMOS TODOS LOS DATOS - COMPLETAR AUTENTICACIÓN
+            self.logger.info("✅ Todos los datos disponibles, completando autenticación sin BD")
+            
+            confirmation_message = f"""✅ **¡Información recopilada correctamente!**
+
+    Tu email no está registrado en nuestra base de datos, pero no hay problema. He registrado tus datos manualmente:
+
+    👤 **Empleado:** {current_data.get('name')}
+    📧 **Email:** {current_data.get('email')}
+    🏪 **Tienda:** {current_data.get('store_name')}
+    📍 **Sección:** {current_data.get('section')}
+
+    Ahora cuéntame: **¿qué problema técnico estás experimentando?** 🔧"""
+            
+            # Configurar estado completo
+            base_update.update({
+                "authentication_stage": "completed",
+                "datos_usuario_completos": True,
+                "ready_for_classification": True,
+                "awaiting_user_input": False,  # ✅ CRÍTICO
+                "employee_name": current_data.get('name'),
+                "incident_store_name": current_data.get('store_name'),
+                "incident_section": current_data.get('section'),
+                "incident_email": current_data.get('email'),
+                "found_in_database": False,
+                "authenticated": True,
+                "manual_registration": True,  # ✅ Indicar que fue registro manual
+                "messages": state.get("messages", []) + [AIMessage(content=confirmation_message)]
+            })
+            
+            return Command(update=base_update)
+        
+        else:
+            # ✅ FALTAN DATOS - PEDIRLOS ESPECÍFICAMENTE
+            missing_fields = []
+            if not has_name:
+                missing_fields.append("nombre completo")
+            if not has_store:
+                missing_fields.append("nombre de tu tienda")
+            if not has_section:
+                missing_fields.append("sección donde trabajas")
+            
+            return self._request_missing_fields_for_manual_registration(state, current_data, missing_fields, base_update, email)
+
+    def _request_missing_fields_for_manual_registration(self, state: EroskiState, current_data: Dict, missing_fields: List[str], base_update: Dict, email: str) -> Command:
+        """Pedir campos faltantes para registro manual"""
+        
+        # Mostrar lo que ya tenemos
+        confirmed_parts = []
+        if current_data.get("name"):
+            confirmed_parts.append(f"👤 **Nombre:** {current_data['name']}")
+        if current_data.get("email"):
+            confirmed_parts.append(f"📧 **Email:** {current_data['email']}")
+        if current_data.get("store_name"):
+            confirmed_parts.append(f"🏪 **Tienda:** {current_data['store_name']}")
+        if current_data.get("section"):
+            confirmed_parts.append(f"📍 **Sección:** {current_data['section']}")
+        
+        confirmed_text = "\n".join(confirmed_parts) if confirmed_parts else ""
+        
+        # Construir mensaje
+        if len(missing_fields) == 1:
+            missing_text = f"tu **{missing_fields[0]}**"
+        else:
+            missing_text = f"tu **{' y '.join(missing_fields)}**"
+        
+        if confirmed_text:
+            message = f"""Tu email `{email}` no está en nuestra base de datos, pero puedo registrarte manualmente. 📝
+
+    **Datos que ya tengo:**
+    {confirmed_text}
+
+    Para completar tu registro, necesito {missing_text}.
+
+    **Ejemplo:** "Trabajo en Eroski Madrid Centro en la sección de carnicería" """
+        else:
+            message = f"""Tu email `{email}` no está en nuestra base de datos, pero puedo ayudarte registrándote manualmente. 📝
+
+    Necesito que me proporciones {missing_text}.
+
+    **Ejemplo:** "Soy María García, trabajo en Eroski Madrid Centro en panadería" """
+        
+        base_update.update({
+            "awaiting_user_input": True,
+            "found_in_database": False,
+            "pending_manual_registration": True,
+            "registration_email": email,
+            "missing_fields": missing_fields,
+            "messages": state.get("messages", []) + [AIMessage(content=message)]
+        })
+        
+        return Command(update=base_update)
+
+
+    async def _handle_user_found_in_db(self, state: EroskiState, decision: ConversationDecision, base_update: Dict, db_result: Dict) -> Command:
+        """Manejar usuario encontrado en BD"""
+        
+        employee = db_result["employee"]
+        self.logger.info(f"✅ Usuario encontrado en BD: {employee.get('name')}")
+        
+        success_message = f"""✅ **¡Perfecto {employee.get('name', 'usuario')}!** Te he encontrado en el sistema.
 
     **Datos confirmados:**
     👤 **Nombre:** {employee.get('name')}
     🏪 **Tienda:** {employee.get('store_name')}
-    📧 **Email:** {email}
+    📧 **Email:** {decision.extracted_data.get('email')}
 
     Ahora cuéntame: **¿qué problema técnico necesitas reportar?** 🔧"""
-                
-                # ✅ CONFIGURAR TODOS LOS CAMPOS REQUERIDOS PARA EL ROUTER
-                base_update.update({
-                    # Campos para el router  
-                    "authentication_stage": "completed",           # ✅ OBLIGATORIO
-                    "datos_usuario_completos": True,               # ✅ OBLIGATORIO
-                    "ready_for_classification": True,              # ✅ OBLIGATORIO
-                    "awaiting_user_input": False,                  # ✅ CRÍTICO - NO esperar input
-                    
-                    # Campos de empleado requeridos por el router
-                    "employee_name": employee.get('name'),         # ✅ OBLIGATORIO
-                    "incident_store_name": employee.get('store_name'),  # ✅ OBLIGATORIO
-                    "incident_section": decision.extracted_data.get("section", "Por especificar"),  # ✅ OBLIGATORIO
-                    "incident_email": email,
-                    
-                    # Datos específicos de BD
-                    "authenticated": True,
-                    "found_in_database": True,
-                    "employee_data": employee,
-                    "employee_id": employee.get("id"),
-                    
-                    # Datos combinados
-                    "auth_data_collected": {
-                        **base_update.get("auth_data_collected", {}),
-                        "name": employee.get("name"),
-                        "email": email,
-                        "store_name": employee.get("store_name"),
-                        "section": decision.extracted_data.get("section", "Por especificar"),
-                        "found_in_database": True
-                    },
-                    
-                    "current_node": "authenticate",
-                    "last_activity": datetime.now(),
-                    "messages": state.get("messages", []) + [AIMessage(content=success_message)]
-                })
-                
-                # ✅ LOGGING PARA VERIFICAR
-                self.logger.info("✅ === COMPLETANDO AUTENTICACIÓN CON BD ===")
-                self.logger.info(f"✅ authentication_stage: {base_update['authentication_stage']}")
-                self.logger.info(f"✅ datos_usuario_completos: {base_update['datos_usuario_completos']}")
-                self.logger.info(f"✅ ready_for_classification: {base_update['ready_for_classification']}")
-                self.logger.info(f"✅ awaiting_user_input: {base_update['awaiting_user_input']}")
-                self.logger.info(f"✅ employee_name: {base_update['employee_name']}")
-                
-                return Command(update=base_update)
-            
-            else:
-                # Usuario no encontrado - continuar con lógica inteligente
-                return self._handle_user_not_found_logic(state, decision, base_update, email)
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error en búsqueda BD: {e}")
-            return self._handle_database_error(state, base_update, str(e))
-
-
+        
+        # Configurar estado completo
+        base_update.update({
+            "authentication_stage": "completed",
+            "datos_usuario_completos": True,
+            "ready_for_classification": True,
+            "awaiting_user_input": False,  # ✅ CRÍTICO
+            "employee_name": employee.get('name'),
+            "incident_store_name": employee.get('store_name'),
+            "incident_section": decision.extracted_data.get("section", "Por especificar"),
+            "incident_email": decision.extracted_data.get('email'),
+            "found_in_database": True,
+            "employee_data": employee,
+            "authenticated": True,
+            "messages": state.get("messages", []) + [AIMessage(content=success_message)]
+        })
+        
+        return Command(update=base_update)
     def _complete_authentication_with_manual_data(self, state: EroskiState, current_data: Dict, base_update: Dict) -> Command:
         """Completar autenticación con datos manuales - VERSIÓN CORREGIDA"""
         
@@ -802,35 +951,69 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
     # =========================================================================
     
     async def _search_employee_database(self, email: str) -> Dict[str, Any]:
-        """Buscar empleado en base de datos"""
+        """Buscar empleado en base de datos - MANEJO ROBUSTO"""
         
         try:
             self.logger.info(f"🔍 Buscando empleado en BD: {email}")
-                    # Asegurar que db_auth esté inicializado
+            
+            # Asegurar que db_auth esté inicializado
             if not hasattr(self, 'db_auth') or self.db_auth is None:
                 from utils.eroski_database_auth import EroskiEmployeeDatabaseAuth
                 self.db_auth = EroskiEmployeeDatabaseAuth()
             
-            # Buscar empleado por email    
-            employee_data = await self.db_auth.get_employee_by_email(email)
+            # ✅ INTENTAR MÚLTIPLES MÉTODOS DE BÚSQUEDA
+            employee_data = None
             
+            # Método 1: validate_employee
+            try:
+                employee_data = await self.db_auth.validate_employee(email)
+                if employee_data:
+                    self.logger.info(f"✅ Empleado encontrado con validate_employee: {employee_data.get('name')}")
+            except AttributeError:
+                self.logger.debug("⚠️ Método validate_employee no disponible")
+            except Exception as e:
+                self.logger.debug(f"⚠️ Error en validate_employee: {e}")
+            
+            # Método 2: Si no se encontró, intentar otros métodos
+            if not employee_data:
+                try:
+                    # Buscar por email usando repositorio directo
+                    if hasattr(self.db_auth, 'user_repository'):
+                        employee_data = await self.db_auth.user_repository.get_user_by_email(email)
+                        if employee_data:
+                            self.logger.info(f"✅ Empleado encontrado con user_repository: {employee_data.get('name')}")
+                except Exception as e:
+                    self.logger.debug(f"⚠️ Error en user_repository: {e}")
+            
+            # ✅ RESULTADO DE LA BÚSQUEDA
             if employee_data:
-                self.logger.info(f"✅ Empleado encontrado: {employee_data.get('name')}")
+                self.logger.info(f"✅ Empleado encontrado en BD: {employee_data.get('name', 'Sin nombre')}")
                 return {
-                    "found": True, 
-                        "employee": employee_data
+                    "found": True,
+                    "employee": employee_data,
+                    "source": "database"
                 }
             else:
-                self.logger.info("❌ Empleado no encontrado en BD")
+                # ✅ NO ES UN ERROR - Es un caso normal
+                self.logger.info(f"📄 Email {email} no está registrado en BD (caso normal)")
                 return {
                     "found": False,
-                    "reason": "No existe en base de datos"
+                    "reason": "Email no registrado en base de datos",
+                    "email": email,
+                    "is_error": False  # ✅ Indicar que NO es un error
                 }
                 
         except Exception as e:
-            self.logger.error(f"❌ Error buscando en BD: {e}")
-            return {"found": False, "error": str(e)}
-    
+            # ✅ ESTE SÍ ES UN ERROR TÉCNICO
+            self.logger.error(f"❌ Error técnico en búsqueda BD: {e}")
+            return {
+                "found": False,
+                "error": str(e),
+                "email": email,
+                "is_error": True  # ✅ Indicar que SÍ es un error
+            }
+
+
     # =========================================================================
     # MANEJO DE ERRORES Y FALLBACKS
     # =========================================================================
