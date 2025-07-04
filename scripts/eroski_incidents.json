@@ -1,104 +1,155 @@
 {
-  "incident_types": {
+  "tipo_incidente": {
+    "balanza": {
+      "name": "Balanzas y Básculas",
+      "description": "Problemas con las balanzas de productos frescos y etiquetado",
+      "problemas": {
+        "La Balanza no imprime las Etiquetas": "Comprobar si tiene papel, y en caso afirmativo Apagar y Encender la Balanza",
+        "La Balanza no se enciende": "Comprobar si el enchufe de Red esta conectado",
+        "El precio que imprime en la etiqueta no es correcto": "Ir a la aplicación de Gisae a informarte del precio de ese producto y registrarlo en la Balanza",
+        "La pantalla no responde": "Reiniciar la balanza desconectando el cable de alimentación durante 30 segundos",
+        "Error de calibración": "Limpiar la superficie de pesado y realizar calibración desde el menú de configuración",
+        "Etiquetas salen en blanco": "Verificar que el rollo de etiquetas esté correctamente instalado y que no esté agotado"
+      },
+      "keywords": ["balanza", "peso", "gramos", "etiqueta", "precio", "fresco", "pesado", "bascula"],
+      "urgency_level": 2,
+      "category": "hardware",
+      "requires_technical_support": false,
+      "estimated_resolution_minutes": 15,
+      "escalation_contacts": ["soporte.balanzas@eroski.es"]
+    },
     "tpv": {
       "name": "TPV (Terminal Punto de Venta)",
-      "keywords": ["tpv", "caja", "terminal", "pago", "tarjeta"],
-      "urgency_level": 3,
-      "estimated_resolution_minutes": 20,
+      "description": "Problemas con las cajas registradoras y terminales de pago",
+      "problemas": {
+        "El TPV no enciende": "Verificar que el cable de alimentación esté conectado y presionar el botón de encendido durante 3 segundos",
+        "No lee las tarjetas": "Limpiar el lector de tarjetas con una tarjeta de limpieza o paño suave",
+        "Error al imprimir tickets": "Comprobar que hay papel en la impresora y que está correctamente instalado",
+        "Pantalla en negro": "Reiniciar el TPV manteniendo presionado el botón de encendido durante 10 segundos",
+        "El cajón no se abre": "Usar la llave manual del cajón o reiniciar el TPV",
+        "Sistema muy lento": "Cerrar aplicaciones innecesarias y reiniciar el terminal si es necesario"
+      },
+      "keywords": ["tpv", "caja", "terminal", "pago", "tarjeta", "efectivo", "ticket", "registradora", "cobrar"],
+      "urgency_level": 4,
+      "category": "hardware",
       "requires_technical_support": true,
-      "escalation_contacts": ["soporte.tpv@eroski.es"]
+      "estimated_resolution_minutes": 10,
+      "escalation_contacts": ["soporte.tpv@eroski.es", "tecnico.tienda@eroski.es"]
     },
-    "impresoras": {
+    "impresora": {
       "name": "Impresoras y Etiquetadoras",
-      "keywords": ["impresora", "ticket", "etiqueta", "papel"],
+      "description": "Problemas con impresoras de tickets, etiquetas y documentos",
+      "problemas": {
+        "La impresora no imprime": "Verificar que esté encendida, tenga papel y que los cables estén conectados",
+        "Se atasca el papel": "Abrir la impresora, retirar el papel atascado cuidadosamente y verificar que el papel esté bien colocado",
+        "Impresión borrosa o con rayas": "Limpiar el cabezal de impresión con alcohol isopropílico y un paño suave",
+        "Sin tinta o tóner": "Reemplazar el cartucho de tinta o tóner por uno nuevo",
+        "Error de comunicación": "Verificar la conexión USB o de red y reiniciar tanto la impresora como el equipo",
+        "Impresión muy lenta": "Cambiar la calidad de impresión a 'borrador' desde la configuración"
+      },
+      "keywords": ["impresora", "imprimir", "papel", "tinta", "ticket", "etiqueta", "atasco", "toner"],
       "urgency_level": 2,
+      "category": "hardware",
+      "requires_technical_support": false,
       "estimated_resolution_minutes": 15,
-      "requires_technical_support": false
-    },
-    "red": {
-      "name": "Problemas de Red",
-      "keywords": ["internet", "wifi", "conexion", "red"],
-      "urgency_level": 3,
-      "estimated_resolution_minutes": 25,
-      "requires_technical_support": true
+      "escalation_contacts": ["soporte.impresoras@eroski.es"]
     },
     "software": {
       "name": "Software Corporativo",
-      "keywords": ["aplicacion", "programa", "sap", "sistema"],
+      "description": "Problemas con aplicaciones y sistemas internos de Eroski",
+      "problemas": {
+        "No puedo acceder al sistema": "Verificar usuario y contraseña, intentar reiniciar la aplicación",
+        "La aplicación se cierra sola": "Cerrar completamente la aplicación y volverla a abrir, si persiste reiniciar el equipo",
+        "Error al guardar datos": "Verificar conexión a internet, intentar guardar en otra ubicación",
+        "Pantalla se congela": "Esperar 30 segundos, si no responde usar Ctrl+Alt+Supr para cerrar la aplicación",
+        "Contraseña no funciona": "Intentar recuperar contraseña o contactar con administrador del sistema",
+        "Sistema muy lento": "Cerrar aplicaciones innecesarias, verificar conexión a internet, reiniciar si es necesario"
+      },
+      "keywords": ["aplicacion", "programa", "software", "sistema", "login", "acceso", "sap", "gisae", "eroski"],
       "urgency_level": 3,
+      "category": "software",
+      "requires_technical_support": true,
       "estimated_resolution_minutes": 25,
-      "requires_technical_support": true
+      "escalation_contacts": ["soporte.software@eroski.es", "sap.support@eroski.es"]
     },
-    "tpv_frozen": {
-      "name": "TPV Congelado",
-      "description": "Terminal de punto de venta que no responde",
-      "keywords": ["tpv", "congelado", "bloqueado", "caja", "terminal"],
+    "red": {
+      "name": "Red y Conectividad",
+      "description": "Problemas de internet, WiFi y conectividad general",
+      "problemas": {
+        "Sin conexión a internet": "Verificar que el cable de red esté conectado o reconectar al WiFi",
+        "WiFi muy lento": "Acercarse al router, verificar que no haya muchos dispositivos conectados",
+        "No encuentra la red WiFi": "Verificar que el WiFi esté activado en el dispositivo y buscar redes disponibles",
+        "Conexión intermitente": "Reiniciar el router/modem, verificar cables de red",
+        "Error de autenticación WiFi": "Verificar la contraseña del WiFi, olvidar y volver a conectar la red",
+        "Todos los sistemas están offline": "Verificar el estado del router principal, contactar inmediatamente con soporte"
+      },
+      "keywords": ["internet", "wifi", "red", "conexion", "lento", "sin internet", "desconectado", "online"],
+      "urgency_level": 4,
+      "category": "network",
+      "requires_technical_support": true,
+      "estimated_resolution_minutes": 10,
+      "escalation_contacts": ["soporte.red@eroski.es", "infraestructura@eroski.es"]
+    },
+    "telefonia": {
+      "name": "Sistema Telefónico",
+      "description": "Problemas con teléfonos y comunicaciones internas",
+      "problemas": {
+        "El teléfono no funciona": "Verificar que esté conectado a la línea y que el cable no esté dañado",
+        "No hay línea telefónica": "Comprobar todas las conexiones y probar con otro teléfono",
+        "No se escucha bien": "Verificar el volumen, limpiar el auricular y micrófono",
+        "No puedo transferir llamadas": "Verificar el procedimiento de transferencia en el manual del teléfono",
+        "La extensión no responde": "Verificar que el teléfono de destino esté descolgado y funcionando",
+        "Eco o ruido en la línea": "Verificar conexiones, si persiste contactar con soporte telefónico"
+      },
+      "keywords": ["telefono", "llamada", "extension", "comunicacion", "sonido", "auricular", "linea"],
+      "urgency_level": 3,
+      "category": "communication",
+      "requires_technical_support": true,
+      "estimated_resolution_minutes": 20,
+      "escalation_contacts": ["soporte.telefonia@eroski.es"]
+    },
+    "email": {
+      "name": "Correo Electrónico",
+      "description": "Problemas con el email corporativo y Outlook",
+      "problemas": {
+        "No recibo emails": "Verificar la carpeta de spam, comprobar conexión a internet, sincronizar buzón",
+        "No puedo enviar emails": "Verificar conexión a internet, comprobar configuración del servidor de salida",
+        "Buzón lleno": "Eliminar emails antiguos, vaciar papelera, archivar mensajes importantes",
+        "Error de configuración": "Verificar configuración del servidor, usuario y contraseña",
+        "Problemas con adjuntos": "Verificar el tamaño del archivo (máximo 25MB), formato del archivo",
+        "Emails van a spam": "Revisar la carpeta de spam, agregar remitentes a lista de contactos seguros"
+      },
+      "keywords": ["email", "correo", "outlook", "enviar", "recibir", "spam", "buzon", "adjunto"],
+      "urgency_level": 2,
+      "category": "communication",
+      "requires_technical_support": false,
+      "estimated_resolution_minutes": 15,
+      "escalation_contacts": ["soporte.email@eroski.es"]
+    },
+    "scanner": {
+      "name": "Escáneres de Códigos de Barras",
+      "description": "Problemas con lectores de códigos de barras y QR",
+      "problemas": {
+        "El scanner no lee códigos": "Limpiar el cristal del scanner con paño suave, verificar que el código no esté dañado",
+        "Luz del scanner no enciende": "Verificar conexión USB, probar en otro puerto USB",
+        "Lee códigos incorrectos": "Limpiar bien el scanner, verificar configuración del software",
+        "Scanner muy lento": "Limpiar el cristal, acercar más el código al scanner",
+        "No conecta con el sistema": "Verificar cable USB, reiniciar el dispositivo conectado",
+        "Sonido no funciona": "Verificar configuración de sonido en el software del scanner"
+      },
+      "keywords": ["scanner", "codigo", "barras", "leer", "qr", "escanear", "pistola"],
       "urgency_level": 3,
       "category": "hardware",
-      "requires_technical_support": true,
-      "estimated_resolution_minutes": 5,
-      "common_issues": [
-          "Reiniciar el TPV manteniendo presionado el botón de encendido",
-          "Verificar conexiones de red y alimentación",
-          "Comprobar que no haya programas bloqueados"
-      ]
-    },
-    "printer_error": {
-        "name": "Error de Impresora",
-        "description": "Problemas con impresoras de tickets o etiquetas",
-        "keywords": ["impresora", "ticket", "papel", "tinta", "no imprime"],
-        "urgency_level": 2,
-        "category": "hardware",
-        "requires_technical_support": false,
-        "estimated_resolution_minutes": 3,
-        "common_issues": [
-            "Verificar que hay papel en la bandeja",
-            "Limpiar cabezales de impresión",
-            "Reiniciar la impresora"
-        ]
-    },
-    "scanner_error": {
-        "name": "Error de Scanner",
-        "description": "Problemas con lectores de códigos de barras",
-        "keywords": ["scanner", "código barras", "lector", "no lee"],
-        "urgency_level": 2,
-        "category": "hardware",
-        "requires_technical_support": false,
-        "estimated_resolution_minutes": 5,
-        "common_issues": [
-            "Limpiar el cristal del scanner",
-            "Verificar conexión USB",
-            "Reiniciar el dispositivo"
-        ]
-    },
-    "network_issue": {
-        "name": "Problema de Red",
-        "description": "Problemas de conectividad de red",
-        "keywords": ["red", "internet", "conexión", "wifi", "ethernet"],
-        "urgency_level": 3,
-        "category": "network",
-        "requires_technical_support": true,
-        "estimated_resolution_minutes": 10,
-        "common_issues": [
-            "Verificar cables de red",
-            "Reiniciar router o switch",
-            "Comprobar configuración de red"
-        ]
-    },
-    "software_error": {
-        "name": "Error de Software",
-        "description": "Problemas con aplicaciones o sistema operativo",
-        "keywords": ["software", "aplicación", "programa", "error", "pantalla"],
-        "urgency_level": 2,
-        "category": "software",
-        "requires_technical_support": true,
-        "estimated_resolution_minutes": 15,
-        "common_issues": [
-            "Reiniciar la aplicación",
-            "Actualizar software",
-            "Verificar permisos de usuario"
-        ]
+      "requires_technical_support": false,
+      "estimated_resolution_minutes": 10,
+      "escalation_contacts": ["soporte.hardware@eroski.es"]
     }
-    
+  },
+  "metadata": {
+    "version": "2.0",
+    "last_updated": "2024-12-20",
+    "description": "Configuración de tipos de incidencia con estructura de problemas y soluciones específicas para Eroski",
+    "total_types": 8,
+    "format": "tipo_incidente -> problemas -> soluciones"
   }
 }

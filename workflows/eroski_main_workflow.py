@@ -100,12 +100,12 @@ class EroskiFinalWorkflow(BaseWorkflow):
         # NUEVO: AUTHENTICATE con router LLM-driven
         graph.add_conditional_edges(
             "authenticate",
-            self.route_authenticate_llm_driven_with_validation,  # Router mejorado
+            self.route_authenticate_simple,  # Router mejorado
             {
-                "continue": "classify",      # Autenticación completa → Clasificar consulta
+                "cancelled": END,             # Usuario canceló → Terminar conversación
                 "need_input": END,           # Esperando input del usuario → Terminar y esperar
-                "escalate": "escalate",      # Error/límite → Escalar a supervisor
-                "cancelled": END             # Usuario canceló → Terminar conversación
+                "classify": "classify",      # Autenticación completa → Clasificar consulta
+                "escalate": "escalate"      # Error/límite → Escalar a supervisor
             }
         )
         
@@ -174,6 +174,23 @@ class EroskiFinalWorkflow(BaseWorkflow):
         return graph
 
     # ========== ROUTING FUNCTIONS MEJORADAS ==========
+    def route_authenticate_simple(self, state):
+        """Router simplificado - solo para casos sin goto"""
+        
+        self.logger.info("🔀 Router ejecutado (goto no funcionó)")
+        
+        # Solo casos básicos
+        if state.get("escalation_needed"):
+            return "escalate"
+        if state.get("awaiting_user_input"):
+            return "need_input"
+        
+        # Si llegamos aquí, algo falló con goto
+        self.logger.warning("⚠️ goto no funcionó, usando router fallback")
+        return "need_input"
+    
+    
+    
     def route_authenticate_llm_driven(self, state: EroskiState) -> Literal["continue", "need_input", "escalate", "cancelled"]:
         """
         Router mejorado para el nodo de autenticación LLM-driven.

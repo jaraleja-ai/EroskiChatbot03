@@ -341,14 +341,13 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
         self.logger.info(f"📊 Datos completos: {current_data}")
         
         # Mensaje de confirmación
-        confirmation_message = f"""✅ **¡Información recopilada correctamente!**
+        confirmation_message = f"""✅ **1. ¡Información recopilada correctamente!**
 
     👤 **Empleado:** {current_data.get('name')}
     📧 **Email:** {current_data.get('email')}
     🏪 **Tienda:** {current_data.get('store_name')}
     📍 **Sección:** {current_data.get('section')}
-
-    Ahora cuéntame: **¿qué problema técnico estás experimentando?** 🔧"""
+    """
         
         # ✅ CONFIGURAR TODOS LOS CAMPOS REQUERIDOS POR EL ROUTER
         complete_update = {
@@ -385,7 +384,7 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
         self.logger.info(f"✅ incident_store_name: {complete_update['incident_store_name']}")
         self.logger.info(f"✅ incident_section: {complete_update['incident_section']}")
         self.logger.info("✅ === FIN CONFIGURACIÓN ESTADO ===")
-        
+        self.logger.info('🌄JGL Lo enviamos a classify')
         return Command(update=complete_update, goto="classify")
 
 
@@ -495,7 +494,7 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
             # ✅ TENEMOS TODOS LOS DATOS - COMPLETAR AUTENTICACIÓN
             self.logger.info("✅ Todos los datos disponibles, completando autenticación sin BD")
             
-            confirmation_message = f"""✅ **¡Información recopilada correctamente!**
+            confirmation_message = f"""✅ **2. ¡Información recopilada correctamente!**
 
     Tu email no está registrado en nuestra base de datos, pero no hay problema. He registrado tus datos manualmente:
 
@@ -504,7 +503,7 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
     🏪 **Tienda:** {current_data.get('store_name')}
     📍 **Sección:** {current_data.get('section')}
 
-    Ahora cuéntame: **¿qué problema técnico estás experimentando?** 🔧"""
+    """
             
             # Configurar estado completo
             base_update.update({
@@ -521,8 +520,8 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
                 "manual_registration": True,  # ✅ Indicar que fue registro manual
                 "messages": state.get("messages", []) + [AIMessage(content=confirmation_message)]
             })
-            
-            return Command(update=base_update)
+            self.logger.info('🌄JGL Lo enviamos a classify')
+            return Command(update=base_update, goto='classify')
         
         else:
             # ✅ FALTAN DATOS - PEDIRLOS ESPECÍFICAMENTE
@@ -616,19 +615,18 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
             "authenticated": True,
             "messages": state.get("messages", []) + [AIMessage(content=success_message)]
         })
-        
+        self.logger.info('🌄JGL Lo enviamos a classify')
         return Command(update=base_update, goto = 'classify')
     def _complete_authentication_with_manual_data(self, state: EroskiState, current_data: Dict, base_update: Dict) -> Command:
         """Completar autenticación con datos manuales - VERSIÓN CORREGIDA"""
         
-        confirmation_message = f"""✅ **¡Información recopilada correctamente!**
+        confirmation_message = f"""✅ **3. ¡Información recopilada correctamente!**
 
     👤 **Empleado:** {current_data.get('name')}
     📧 **Email:** {current_data.get('email')}
     🏪 **Tienda:** {current_data.get('store_name')}
     📍 **Sección:** {current_data.get('section')}
-
-    Ahora cuéntame: **¿qué problema técnico estás experimentando?** 🔧"""
+"""
         
         # ✅ ASEGURAR QUE TODOS LOS CAMPOS REQUERIDOS ESTÉN CONFIGURADOS
         base_update.update({
@@ -662,6 +660,7 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
         self.logger.info(f"✅ incident_store_name: {base_update['incident_store_name']}")
         self.logger.info(f"✅ incident_section: {base_update['incident_section']}")
         
+        self.logger.info('🌄JGL Lo enviamos a classify')
         return Command(update=base_update, goto="classify" )
 
 
@@ -772,7 +771,7 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
 
 
         
-        confirmation_message = f"""✅ **¡Información recopilada correctamente!**
+        confirmation_message = f"""✅ **4. ¡Información recopilada correctamente!**
 
 👤 **Empleado:** {collected_data.get('name')}
 📧 **Email:** {collected_data.get('email')}
@@ -1025,7 +1024,8 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
         """Proceder al siguiente paso cuando la autenticación está completa"""
         
         self.logger.info("✅ Autenticación ya completa, procediendo a clasificación")
-        
+        self.logger.info('🌄JGL Lo enviamos a classify')
+
         return Command(update={
             "current_node": "authenticate",
             "last_activity": datetime.now()
@@ -1293,53 +1293,37 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos definidos (aun
 #    state.update(command.update)
 #    return state
 
-async def llm_driven_authenticate_node(state: EroskiState) -> EroskiState:
+# ✅ WRAPPER CORREGIDO (solución):
+async def llm_driven_authenticate_node(state: EroskiState) -> Command:
     """
-    Función wrapper para LangGraph - VERSIÓN CORREGIDA
-    
-    ⚠️ IMPORTANTE: Esta función debe estar en el nivel del módulo,
-    NO dentro de la clase.
-    
-    LangGraph espera que los nodos:
-    1. Reciban el estado como dict
-    2. Retornen el estado actualizado como dict (NO Command)
+    ✅ VERSIÓN CORREGIDA: Retorna Command con goto
     """
     
     logger = logging.getLogger("Node.authenticate")
-    logger.info("🔍 === ENTRANDO EN WRAPPER ===")
-    logger.info(f"📥 Estado recibido: {list(state.keys())}")
+    logger.info("🔍 === WRAPPER CORREGIDO ===")
     
     try:
-        # Crear instancia del nodo
         node = LLMDrivenAuthenticateNode()
-        
-        # Ejecutar el nodo (retorna Command)
         command = await node.execute(state)
         
-        # ✅ APLICAR LAS ACTUALIZACIONES AL ESTADO
-        updated_state = {**state, **command.update}
+        # ✅ VERIFICAR GOTO
+        if hasattr(command, 'goto') and command.goto:
+            logger.info(f"✅ GOTO detectado: {command.goto}")
+        else:
+            logger.info("⚠️ No hay GOTO")
         
-        # ✅ LOGGING PARA VERIFICAR QUE SE ACTUALIZA
-        logger.info("🔍 === ACTUALIZACIONES APLICADAS ===")
-        for key, value in command.update.items():
-            logger.info(f"🔧 {key}: {value}")
-        logger.info("🔍 === FIN ACTUALIZACIONES ===")
-        
-        # ✅ RETORNAR ESTADO ACTUALIZADO (dict, NO Command)
-        return updated_state
+        # ✅ RETORNAR COMMAND DIRECTAMENTE
+        return command  # ✅ Mantiene goto
         
     except Exception as e:
-        logger.error(f"💥 Error en wrapper: {e}")
-        
-        # Fallback en caso de error
-        return {
+        logger.error(f"💥 Error: {e}")
+        return Command(update={
             **state,
-            "current_node": "authenticate",
             "error_occurred": True,
-            "error_message": str(e),
-            "messages": [AIMessage(content="❌ Error técnico. Contacta con soporte.")],
-            "awaiting_user_input": False
-        }
+            "escalation_needed": True
+        })
+
+
 
     #command = await node.execute(state)
     #return {**state, **command.update}
