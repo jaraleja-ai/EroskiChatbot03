@@ -34,7 +34,10 @@ class SpecificProblemDecision(BaseModel):
     
     problem_identified: bool = Field(description="Si se identificó el problema específico")
     specific_problem: Optional[str] = Field(description="Problema específico del catálogo")
-    problem_description: str = Field(description="Descripción del problema (puede ser 'otros')")
+    problem_description: Optional[str] = Field(
+        description="Descripción del problema (puede ser 'otros')", 
+        default="No especificado"
+    )
     solution_available: bool = Field(description="Si hay solución disponible para este problema")
     proposed_solution: Optional[str] = Field(description="Solución propuesta si está disponible")
     additional_info: Optional[str] = Field(description="Información adicional sobre el problema", default=None)
@@ -120,15 +123,10 @@ RESPONDE ÚNICAMENTE CON JSON:
 
 def build_phase_2_prompt() -> PromptTemplate:
     """
-    FASE 2: Identificar PROBLEMA ESPECÍFICO dentro del tipo
-    
-    Objetivo: Encontrar el problema específico del catálogo o marcar como "otros"
-    Actualiza: state.incident_description + state.additional_info
+    FASE 2: Identificar PROBLEMA ESPECÍFICO - PROMPT MEJORADO
     """
     return PromptTemplate(
-        template="""Eres un especialista en diagnóstico de problemas específicos de {incident_type}.
-
-🎯 **MISIÓN FASE 2:** Identificar el PROBLEMA ESPECÍFICO dentro de {incident_type}.
+        template="""🎯 **MISIÓN FASE 2:** Identificar el PROBLEMA ESPECÍFICO dentro de {incident_type}.
 
 INFORMACIÓN DE FASE 1:
 - Tipo identificado: {incident_type}
@@ -157,49 +155,28 @@ HISTORIAL COMPLETO:
    - Si no coincide con ninguno → problem_description: "otros"
    - Capturar descripción del usuario en additional_info
 
-✅ **EJEMPLOS DE IDENTIFICACIÓN:**
-
-**Ejemplo A - Coincidencia exacta:**
-Usuario: "no imprime etiquetas" + Tipo: "balanza"
-→ specific_problem: "La balanza no imprime etiquetas"
-→ solution_available: true
-
-**Ejemplo B - Coincidencia por síntomas:**
-Usuario: "las etiquetas salen en blanco" + Tipo: "balanza"  
-→ specific_problem: "Las etiquetas salen en blanco"
-→ solution_available: true
-
-**Ejemplo C - Problema no catalogado:**
-Usuario: "hace ruido raro" + Tipo: "balanza"
-→ problem_description: "otros"
-→ additional_info: "La balanza hace ruido raro"
-→ next_action: "ask_details"
-
-**Ejemplo D - Información insuficiente:**
-Usuario: "va mal" + Tipo: "balanza"
-→ problem_identified: false
-→ next_action: "ask_details"
-
-🔧 **SOLUCIONES DISPONIBLES:**
-Si identificas un problema del catálogo, incluye la solución correspondiente.
-
-RESPONDE ÚNICAMENTE CON JSON:
+RESPONDE ÚNICAMENTE CON JSON VÁLIDO:
 {{
   "problem_identified": true/false,
   "specific_problem": "Problema exacto del catálogo o null",
-  "problem_description": "Descripción del problema o 'otros'",
+  "problem_description": "Descripción del problema o 'otros' - NUNCA null",
   "solution_available": true/false,
   "proposed_solution": "Solución paso a paso o null",
-  "additional_info": "Información adicional capturada",
+  "additional_info": "Información adicional capturada o null",
   "confidence_level": 0.0-1.0,
   "next_action": "provide_solution|ask_details|escalate"
-}}""",
+}}
+
+⚠️ **IMPORTANTE:** 
+- problem_description NUNCA debe ser null, siempre un string
+- Si no hay descripción clara, usar "Problema no especificado"
+- Si es problema no catalogado, usar "otros"
+""",
         input_variables=[
             "incident_type", "phase1_additional_info", "phase1_confidence",
             "specific_problems_catalog", "conversation_history", "user_message"
         ]
     )
-
 # =============================================================================
 # LÓGICA PRINCIPAL DE CLASIFICACIÓN EN DOS FASES
 # =============================================================================
@@ -284,35 +261,75 @@ class TwoPhaseClassifier:
         return IncidentTypeDecision(**decision_data)
     
     async def _execute_phase_2_with_state(self, state: EroskiState) -> Command:
-        """Ejecutar FASE 2: Identificación del problema específico"""
+        """Ejecutar FASE 2 con validación mejorada"""
         
-        incident_type = state.get("incident_type")
-        if not incident_type:
-            self.logger.error("❌ FASE 2 llamada sin incident_type en el estado")
-            return self._escalate_error(state)
+        try:
+            # Ejecutar Fase 2
+            phase2_result = await self._execute_phase_2(state)
+            
+            # ✅ VALIDACIÓN ADICIONAL: Verificar que problem_description no sea None
+            if phase2_result.problem_description is None:
+                self.logger.warning("⚠️ problem_description es None, aplicando fallback")
+                
+                # Crear una nueva instancia con valores por defecto
+                phase2_result = SpecificProblemDecision(
+                    problem_identified=phase2_result.problem_identified,
+                    specific_problem=phase2_result.specific_problem,
+                    problem_description="Problema no especificado",  # ✅ Valor por defecto
+                    solution_available=phase2_result.solution_available,
+                    proposed_solution=phase2_result.proposed_solution,
+                    additional_info=phase2_result.additional_info,
+                    confidence_level=phase2_result.confidence_level,
+                    next_action=phase2_result.next_action
+                )
+            
+            # Procesar resultado según el next_action
+            if phase2_result.next_action == "provide_solution" and phase2_result.solution_available:
+                return self._provide_solution_response(state, phase2_result)
+            
+            elif phase2_result.next_action == "ask_details":
+                return self._ask_for_more_details(state, phase2_result)
+            
+            elif phase2_result.next_action == "escalate":
+                return self._escalate_incident(state, phase2_result)
+            
+            else:
+                # Fallback por defecto
+                return self._ask_for_more_details(state, phase2_result)
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error en Fase 2: {e}")
+            
+            # ✅ MANEJO ROBUSTO DE ERRORES
+            return Command(
+                update={
+                    **state,
+                    "last_error": f"Error en clasificación: {str(e)}",
+                    "needs_escalation": True
+                },
+                graph=self._create_error_response_with_escalation(state, str(e))
+            )
+
+    
+    def _create_error_response_with_escalation(self, state: EroskiState, error_message: str) -> EroskiState:
+        """Crear respuesta de error con escalación automática"""
         
-        # Preparar datos para FASE 2
-        prompt_data = {
-            "incident_type": incident_type,
-            "phase1_additional_info": state.get("additional_info", "Ninguna"),
-            "phase1_confidence": "Alta",  # Si llegamos aquí, la fase 1 tuvo alta confianza
-            "specific_problems_catalog": self._get_specific_problems_for_type(incident_type),
-            "conversation_history": self._format_conversation_history(state),
-            "user_message": self._get_last_user_message(state)
+        error_response = (
+            "⚠️ **Error Temporal**\n\n"
+            "Ha ocurrido un problema técnico durante la clasificación de tu incidencia.\n\n"
+            "Por favor, intenta describir tu problema de nuevo o solicita hablar con un supervisor.\n\n"
+            "Error técnico registrado para nuestro equipo de sistemas."
+        )
+        
+        updated_state = {
+            **state,
+            "messages": state["messages"] + [AIMessage(content=error_response)],
+            "needs_escalation": True,
+            "escalation_reason": f"Error técnico: {error_message}",
+            "current_node": "escalate"
         }
         
-        # Ejecutar LLM Fase 2
-        formatted_prompt = self.phase2_prompt.format(**prompt_data)
-        response = await self.llm.ainvoke(formatted_prompt)
-        
-        # Parsear respuesta
-        decision_data = self.phase2_parser.parse(response.content)
-        phase2_result = SpecificProblemDecision(**decision_data)
-        
-        self.logger.info(f"✅ FASE 2 COMPLETADA: {phase2_result.problem_description}")
-        
-        # Procesar resultado de FASE 2
-        return self._process_phase2_result(state, phase2_result)
+        return updated_state
     
     def _update_state_after_phase1(self, state: EroskiState, phase1_result: IncidentTypeDecision) -> EroskiState:
         """Actualizar estado después de FASE 1"""

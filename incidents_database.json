@@ -264,5 +264,19 @@
     "solucion_aplicada": null,
     "estado_solucion": null,
     "mensajes": []
+  },
+  "ER-4456": {
+    "codigo_incidencia": "ER-4456",
+    "timestamp_creacion": "2025-07-04T18:39:34.166156",
+    "estado": "abierta",
+    "nombre_empleado": "Javier Guerra",
+    "email_empleado": "javier.guerra@devol.es",
+    "nombre_tienda": "Eroski Bilbao Centro",
+    "seccion": "Carnicería",
+    "tipo_incidencia": null,
+    "problema_especifico": null,
+    "solucion_aplicada": null,
+    "estado_solucion": null,
+    "mensajes": []
   }
 }
