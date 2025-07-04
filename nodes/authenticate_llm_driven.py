@@ -1291,15 +1291,23 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos definidos (aun
 #    state.update(command.update)
 #    return state
 
-    async def llm_driven_authenticate_node(state: EroskiState) -> EroskiState:
-        """
-        Función wrapper para LangGraph - VERSIÓN CORREGIDA
-        
-        LangGraph espera que los nodos:
-        1. Reciban el estado como dict
-        2. Retornen el estado actualizado como dict
-        """
-        
+async def llm_driven_authenticate_node(state: EroskiState) -> EroskiState:
+    """
+    Función wrapper para LangGraph - VERSIÓN CORREGIDA
+    
+    ⚠️ IMPORTANTE: Esta función debe estar en el nivel del módulo,
+    NO dentro de la clase.
+    
+    LangGraph espera que los nodos:
+    1. Reciban el estado como dict
+    2. Retornen el estado actualizado como dict (NO Command)
+    """
+    
+    logger = logging.getLogger("Node.authenticate")
+    logger.info("🔍 === ENTRANDO EN WRAPPER ===")
+    logger.info(f"📥 Estado recibido: {list(state.keys())}")
+    
+    try:
         # Crear instancia del nodo
         node = LLMDrivenAuthenticateNode()
         
@@ -1310,13 +1318,26 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos definidos (aun
         updated_state = {**state, **command.update}
         
         # ✅ LOGGING PARA VERIFICAR QUE SE ACTUALIZA
-        logging.getLogger("Node.authenticate").info("🔍 === ACTUALIZACIONES APLICADAS ===")
+        logger.info("🔍 === ACTUALIZACIONES APLICADAS ===")
         for key, value in command.update.items():
-            logging.getLogger("Node.authenticate").info(f"🔧 {key}: {value}")
-        logging.getLogger("Node.authenticate").info("🔍 === FIN ACTUALIZACIONES ===")
+            logger.info(f"🔧 {key}: {value}")
+        logger.info("🔍 === FIN ACTUALIZACIONES ===")
         
-        # ✅ RETORNAR ESTADO ACTUALIZADO (dict)
+        # ✅ RETORNAR ESTADO ACTUALIZADO (dict, NO Command)
         return updated_state
+        
+    except Exception as e:
+        logger.error(f"💥 Error en wrapper: {e}")
+        
+        # Fallback en caso de error
+        return {
+            **state,
+            "current_node": "authenticate",
+            "error_occurred": True,
+            "error_message": str(e),
+            "messages": [AIMessage(content="❌ Error técnico. Contacta con soporte.")],
+            "awaiting_user_input": False
+        }
 
     #command = await node.execute(state)
     #return {**state, **command.update}
