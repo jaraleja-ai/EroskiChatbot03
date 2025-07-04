@@ -1,5 +1,5 @@
 {
-  "tipo_incidente": {
+  "incident_types": {
     "balanza": {
       "name": "Balanzas y Básculas",
       "description": "Problemas con las balanzas de productos frescos y etiquetado",

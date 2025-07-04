@@ -1,282 +1,83 @@
 {
-  "ER-3505": {
-    "codigo_incidencia": "ER-3505",
-    "timestamp_creacion": "2025-07-04T16:57:47.485735",
+  "ER-5510": {
+    "codigo_incidencia": "ER-5510",
+    "timestamp_creacion": "2025-07-04T22:47:10.134864",
     "estado": "abierta",
     "nombre_empleado": "Javier Guerra",
     "email_empleado": "javier.guerra@devol.es",
     "nombre_tienda": "Eroski Bilbao Centro",
     "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
+    "tipo_incidencia": "balanza",
+    "problema_especifico": "Error de calibración",
+    "solucion_aplicada": "Limpiar la superficie de pesado y realizar calibración desde el menú de configuración",
+    "estado_solucion": "propuesta",
+    "mensajes": [],
+    "timestamp_actualizacion": "2025-07-04T22:47:20.365878"
   },
-  "ER-9088": {
-    "codigo_incidencia": "ER-9088",
-    "timestamp_creacion": "2025-07-04T16:58:13.213570",
+  "ER-8149": {º º
+    "codigo_incidencia": "ER-8149",
+    "timestamp_creacion": "2025-07-04T22:53:27.026769",
     "estado": "abierta",
     "nombre_empleado": "Javier Guerra",
     "email_empleado": "javier.guerra@devol.es",
     "nombre_tienda": "Eroski Bilbao Centro",
     "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-5449": {
-    "codigo_incidencia": "ER-5449",
-    "timestamp_creacion": "2025-07-04T17:03:38.101979",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-4330": {
-    "codigo_incidencia": "ER-4330",
-    "timestamp_creacion": "2025-07-04T17:03:50.417031",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-5473": {
-    "codigo_incidencia": "ER-5473",
-    "timestamp_creacion": "2025-07-04T17:08:58.714151",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-1117": {
-    "codigo_incidencia": "ER-1117",
-    "timestamp_creacion": "2025-07-04T17:09:29.904268",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-9901": {
-    "codigo_incidencia": "ER-9901",
-    "timestamp_creacion": "2025-07-04T17:12:19.478675",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-2843": {
-    "codigo_incidencia": "ER-2843",
-    "timestamp_creacion": "2025-07-04T17:12:36.586157",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-2743": {
-    "codigo_incidencia": "ER-2743",
-    "timestamp_creacion": "2025-07-04T17:12:47.979918",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-5522": {
-    "codigo_incidencia": "ER-5522",
-    "timestamp_creacion": "2025-07-04T17:13:52.014081",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-8640": {
-    "codigo_incidencia": "ER-8640",
-    "timestamp_creacion": "2025-07-04T17:14:00.096679",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-1644": {
-    "codigo_incidencia": "ER-1644",
-    "timestamp_creacion": "2025-07-04T17:32:35.140009",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-8550": {
-    "codigo_incidencia": "ER-8550",
-    "timestamp_creacion": "2025-07-04T17:32:51.279840",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-9135": {
-    "codigo_incidencia": "ER-9135",
-    "timestamp_creacion": "2025-07-04T17:33:01.388416",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-6224": {
-    "codigo_incidencia": "ER-6224",
-    "timestamp_creacion": "2025-07-04T17:33:32.573499",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-1084": {
-    "codigo_incidencia": "ER-1084",
-    "timestamp_creacion": "2025-07-04T17:51:34.610545",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-7314": {
-    "codigo_incidencia": "ER-7314",
-    "timestamp_creacion": "2025-07-04T17:52:01.612105",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-4726": {
-    "codigo_incidencia": "ER-4726",
-    "timestamp_creacion": "2025-07-04T17:56:46.310738",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-8869": {
-    "codigo_incidencia": "ER-8869",
-    "timestamp_creacion": "2025-07-04T17:57:47.054663",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
-  },
-  "ER-4456": {
-    "codigo_incidencia": "ER-4456",
-    "timestamp_creacion": "2025-07-04T18:39:34.166156",
-    "estado": "abierta",
-    "nombre_empleado": "Javier Guerra",
-    "email_empleado": "javier.guerra@devol.es",
-    "nombre_tienda": "Eroski Bilbao Centro",
-    "seccion": "Carnicería",
-    "tipo_incidencia": null,
-    "problema_especifico": null,
-    "solucion_aplicada": null,
-    "estado_solucion": null,
-    "mensajes": []
+    "tipo_incidencia": "balanza",
+    "problema_especifico": "Error de calibración",
+    "solucion_aplicada": "Limpiar la superficie de pesado y realizar calibración desde el menú de configuración",
+    "estado_solucion": "propuesta",
+    "mensajes": [
+      {
+        "tipo": "usuario",
+        "contenido": "hola, tengo un problema con la balanza",
+        "timestamp": "2025-07-04T22:53:30.379384"
+      },
+      {
+        "tipo": "bot",
+        "contenido": "Hola! Veo que tienes un problema con una balanza. Para ayudarte necesito verificar algunos datos. ¿Podrías decirme tu nombre completo?",
+        "timestamp": "2025-07-04T22:53:30.379384"
+      },
+      {
+        "tipo": "usuario",
+        "contenido": "Javier Guerra",
+        "timestamp": "2025-07-04T22:53:30.379384"
+      },
+      {
+        "tipo": "bot",
+        "contenido": "Perfecto, Javier. ¿Cuál es tu email corporativo?",
+        "timestamp": "2025-07-04T22:53:30.379384"
+      },
+      {
+        "tipo": "usuario",
+        "contenido": "javier.guerra@devol.es, tienda de Eroski en el centro de Bilbao",
+        "timestamp": "2025-07-04T22:53:30.379384"
+      },
+      {
+        "tipo": "bot",
+        "contenido": "Entiendo que trabajas en Eroski del centro de Bilbao. ¿En qué sección específica trabajas?",
+        "timestamp": "2025-07-04T22:53:30.379384"
+      },
+      {
+        "tipo": "usuario",
+        "contenido": "esta en la sección de carnicería",
+        "timestamp": "2025-07-04T22:53:30.379384"
+      },
+      {
+        "tipo": "bot",
+        "contenido": "Perfecto, Javier. Ya tengo todos tus datos:\n- Nombre: Javier Guerra\n- Email: javier.guerra@devol.es\n- Tienda: Eroski Bilbao Centro\n- Sección: Carnicería\n\nAhora vamos a analizar el problema con la balanza. ¿Podrías contarme más detalles sobre qué está ocurriendo?",
+        "timestamp": "2025-07-04T22:53:30.379384"
+      },
+      {
+        "tipo": "usuario",
+        "contenido": "debe ser un tema de calibración",
+        "timestamp": "2025-07-04T22:53:30.379384"
+      },
+      {
+        "tipo": "bot",
+        "contenido": "✅ **Problema identificado: Balanza**\n\n    📋 **Problema específico:** Error de calibración\n\n    🔧 **Solución paso a paso:**\n    Limpiar la superficie de pesado y realizar calibración desde el menú de configuración\n\n    🤔 **¿Quieres intentar esta solución?**\n    - Responde **'sí'** para que te guíe paso a paso\n    - Responde **'no entiendo'** si necesitas más explicación\n    - Responde **'ya lo intenté'** si ya probaste esto\n\n    📋 *Código de incidencia: ER-8149*",
+        "timestamp": "2025-07-04T22:53:30.379384"
+      }
+    ],
+    "timestamp_actualizacion": "2025-07-04T22:53:30.379384"
   }
 }

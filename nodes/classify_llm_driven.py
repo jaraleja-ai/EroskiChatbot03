@@ -201,7 +201,6 @@ class LLMDrivenClassifyNode(BaseNode):
         try:
             # Usar directamente el archivo JSON
             json_paths = [
-                Path("config/eroski_incidents.json"),
                 Path("scripts/eroski_incidents.json")
             ]
             

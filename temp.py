@@ -1,377 +1,14 @@
-# =====================================================
-# CLASIFICACIÓN EN DOS FASES CON ESTADO EroskiState
-# =====================================================
+# REEMPLAZAR este método existente:
+def _provide_solution(self, state: EroskiState, phase2_result: SpecificProblemDecision) -> Command:
+    # ... código que ya tenías con la persistencia básica
 
-from typing import Dict, Any, Optional, List
-from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.types import Command
-from datetime import datetime
-import logging
-from pydantic import BaseModel, Field
-
-from models.eroski_state import EroskiState
-from utils.llm.providers import get_llm
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
-
-# =============================================================================
-# MODELOS PARA LAS DOS FASES
-# =============================================================================
-
-class IncidentTypeDecision(BaseModel):
-    """Decisión de la FASE 1: Identificación del tipo de incidencia"""
+# CON esta versión que incluye mensajes:
+def _provide_solution(self, state: EroskiState, phase2_result: SpecificProblemDecision) -> Command:
+    """Proporcionar solución identificada y actualizar persistencia completa"""
     
-    incident_type_identified: bool = Field(description="Si se identificó el tipo de incidencia")
-    incident_type: Optional[str] = Field(description="Tipo identificado (balanza, tpv, impresora, etc.)")
-    confidence_level: float = Field(description="Confianza en la identificación (0-1)")
-    keywords_detected: List[str] = Field(description="Palabras clave que llevaron a la identificación", default=[])
-    additional_info: Optional[str] = Field(description="Información adicional relevante detectada", default=None)
-    reasoning: str = Field(description="Razonamiento de por qué se identificó este tipo")
-    needs_clarification: bool = Field(description="Si necesita más información para identificar", default=False)
-
-class SpecificProblemDecision(BaseModel):
-    """Decisión de la FASE 2: Identificación del problema específico"""
+    incident_code = state.get("incident_code", "N/A")
     
-    problem_identified: bool = Field(description="Si se identificó el problema específico")
-    specific_problem: Optional[str] = Field(description="Problema específico del catálogo")
-    problem_description: str = Field(description="Descripción del problema (puede ser 'otros')")
-    solution_available: bool = Field(description="Si hay solución disponible para este problema")
-    proposed_solution: Optional[str] = Field(description="Solución propuesta si está disponible")
-    additional_info: Optional[str] = Field(description="Información adicional sobre el problema", default=None)
-    confidence_level: float = Field(description="Confianza en la identificación del problema (0-1)")
-    next_action: str = Field(description="Próxima acción: provide_solution, ask_details, escalate")
-
-# =============================================================================
-# PROMPTS PARA LAS DOS FASES
-# =============================================================================
-
-def build_phase_1_prompt() -> PromptTemplate:
-    """
-    FASE 1: Identificar TIPO de incidencia
-    
-    Objetivo: Determinar si es balanza, TPV, impresora, red, etc.
-    Actualiza: state.incident_type + state.additional_info
-    """
-    return PromptTemplate(
-        template="""Eres un especialista en identificación de TIPOS de incidencias técnicas en Eroski.
-
-🎯 **MISIÓN FASE 1:** Identificar ÚNICAMENTE el TIPO de equipo/sistema con problemas.
-
-EMPLEADO: {employee_name} - Sección: {section} - Tienda: {store_name}
-
-TIPOS DE EQUIPOS DISPONIBLES:
-{equipment_types}
-
-HISTORIAL COMPLETO DE MENSAJES:
-{conversation_history}
-
-ÚLTIMO MENSAJE: "{user_message}"
-
-🔍 **ANÁLISIS REQUERIDO:**
-
-1️⃣ **Identificar el EQUIPO/SISTEMA:**
-   - ¿Menciona directamente un equipo? (balanza, TPV, impresora, ordenador...)
-   - ¿Se puede inferir por la sección? (carnicería → probable balanza)
-   - ¿Hay palabras clave técnicas? (etiquetas, pantalla, peso, conexión...)
-
-2️⃣ **Evaluar CONFIANZA:**
-   - Alta (>0.8): Mención directa o contexto muy claro
-   - Media (0.5-0.8): Se puede inferir razonablemente
-   - Baja (<0.5): Muy vago o ambiguo
-
-3️⃣ **Capturar INFORMACIÓN ADICIONAL:**
-   - Síntomas mencionados
-   - Detalles técnicos
-   - Contexto temporal (desde cuándo, frecuencia...)
-
-✅ **EJEMPLOS DE IDENTIFICACIÓN CORRECTA:**
-
-**Ejemplo A - Mención directa:**
-Usuario: "la balanza no funciona bien"
-→ incident_type: "balanza", confidence: 0.95
-
-**Ejemplo B - Inferencia por contexto:**
-Usuario: "problema con las etiquetas" + Sección: "carnicería"
-→ incident_type: "balanza", confidence: 0.85
-
-**Ejemplo C - Síntoma técnico:**
-Usuario: "no puedo cobrar" + Sección: "caja"
-→ incident_type: "tpv", confidence: 0.8
-
-**Ejemplo D - Información insuficiente:**
-Usuario: "no funciona"
-→ incident_type_identified: false, needs_clarification: true
-
-RESPONDE ÚNICAMENTE CON JSON:
-{{
-  "incident_type_identified": true/false,
-  "incident_type": "balanza|tpv|impresora|red|ordenador|telefono|otros",
-  "confidence_level": 0.0-1.0,
-  "keywords_detected": ["palabra1", "palabra2"],
-  "additional_info": "Información relevante detectada",
-  "reasoning": "Razón por la que identifiqué este tipo",
-  "needs_clarification": true/false
-}}""",
-        input_variables=[
-            "employee_name", "section", "store_name", "equipment_types",
-            "conversation_history", "user_message"
-        ]
-    )
-
-def build_phase_2_prompt() -> PromptTemplate:
-    """
-    FASE 2: Identificar PROBLEMA ESPECÍFICO dentro del tipo
-    
-    Objetivo: Encontrar el problema específico del catálogo o marcar como "otros"
-    Actualiza: state.incident_description + state.additional_info
-    """
-    return PromptTemplate(
-        template="""Eres un especialista en diagnóstico de problemas específicos de {incident_type}.
-
-🎯 **MISIÓN FASE 2:** Identificar el PROBLEMA ESPECÍFICO dentro de {incident_type}.
-
-INFORMACIÓN DE FASE 1:
-- Tipo identificado: {incident_type}
-- Información adicional: {phase1_additional_info}
-- Confianza Fase 1: {phase1_confidence}
-
-PROBLEMAS ESPECÍFICOS DISPONIBLES PARA {incident_type}:
-{specific_problems_catalog}
-
-HISTORIAL COMPLETO:
-{conversation_history}
-
-ÚLTIMO MENSAJE: "{user_message}"
-
-🔍 **ANÁLISIS DE PROBLEMA ESPECÍFICO:**
-
-1️⃣ **Buscar COINCIDENCIA EXACTA:**
-   - ¿El usuario describe exactamente uno de los problemas del catálogo?
-   - ¿Usa palabras clave que coinciden directamente?
-
-2️⃣ **Buscar COINCIDENCIA PARCIAL:**
-   - ¿Los síntomas coinciden con algún problema conocido?
-   - ¿Se puede inferir cuál es el problema más probable?
-
-3️⃣ **Evaluar si es PROBLEMA NO CATALOGADO:**
-   - Si no coincide con ninguno → problem_description: "otros"
-   - Capturar descripción del usuario en additional_info
-
-✅ **EJEMPLOS DE IDENTIFICACIÓN:**
-
-**Ejemplo A - Coincidencia exacta:**
-Usuario: "no imprime etiquetas" + Tipo: "balanza"
-→ specific_problem: "La balanza no imprime etiquetas"
-→ solution_available: true
-
-**Ejemplo B - Coincidencia por síntomas:**
-Usuario: "las etiquetas salen en blanco" + Tipo: "balanza"  
-→ specific_problem: "Las etiquetas salen en blanco"
-→ solution_available: true
-
-**Ejemplo C - Problema no catalogado:**
-Usuario: "hace ruido raro" + Tipo: "balanza"
-→ problem_description: "otros"
-→ additional_info: "La balanza hace ruido raro"
-→ next_action: "ask_details"
-
-**Ejemplo D - Información insuficiente:**
-Usuario: "va mal" + Tipo: "balanza"
-→ problem_identified: false
-→ next_action: "ask_details"
-
-🔧 **SOLUCIONES DISPONIBLES:**
-Si identificas un problema del catálogo, incluye la solución correspondiente.
-
-RESPONDE ÚNICAMENTE CON JSON:
-{{
-  "problem_identified": true/false,
-  "specific_problem": "Problema exacto del catálogo o null",
-  "problem_description": "Descripción del problema o 'otros'",
-  "solution_available": true/false,
-  "proposed_solution": "Solución paso a paso o null",
-  "additional_info": "Información adicional capturada",
-  "confidence_level": 0.0-1.0,
-  "next_action": "provide_solution|ask_details|escalate"
-}}""",
-        input_variables=[
-            "incident_type", "phase1_additional_info", "phase1_confidence",
-            "specific_problems_catalog", "conversation_history", "user_message"
-        ]
-    )
-
-# =============================================================================
-# LÓGICA PRINCIPAL DE CLASIFICACIÓN EN DOS FASES
-# =============================================================================
-
-class TwoPhaseClassifier:
-    """
-    Clasificador en dos fases que usa EroskiState como canal de comunicación
-    """
-    
-    def __init__(self):
-        self.llm = get_llm()
-        self.logger = logging.getLogger("TwoPhaseClassifier")
-        
-        # Parsers para cada fase
-        self.phase1_parser = JsonOutputParser(pydantic_object=IncidentTypeDecision)
-        self.phase2_parser = JsonOutputParser(pydantic_object=SpecificProblemDecision)
-        
-        # Prompts para cada fase
-        self.phase1_prompt = build_phase_1_prompt()
-        self.phase2_prompt = build_phase_2_prompt()
-    
-    async def classify_incident(self, state: EroskiState) -> Command:
-        """
-        Ejecutar clasificación en dos fases usando EroskiState
-        
-        Args:
-            state: Estado actual con mensajes e información del empleado
-            
-        Returns:
-            Command con estado actualizado
-        """
-        
-        # ✅ FASE 1: Identificar TIPO de incidencia
-        if not state.get("incident_type"):
-            self.logger.info("🔍 FASE 1: Identificando tipo de incidencia...")
-            
-            phase1_result = await self._execute_phase_1(state)
-            
-            if phase1_result.incident_type_identified and phase1_result.confidence_level >= 0.7:
-                # Actualizar estado con tipo identificado
-                updated_state = self._update_state_after_phase1(state, phase1_result)
-                
-                self.logger.info(f"✅ FASE 1 COMPLETADA: {phase1_result.incident_type} (confianza: {phase1_result.confidence_level})")
-                
-                # Continuar inmediatamente a FASE 2
-                return await self._execute_phase_2_with_state(updated_state)
-            
-            elif phase1_result.needs_clarification:
-                # Necesita más información para identificar tipo
-                return self._ask_for_type_clarification(state, phase1_result)
-            
-            else:
-                # Confianza baja, pedir más información
-                return self._ask_general_clarification(state)
-        
-        # ✅ FASE 2: Identificar PROBLEMA ESPECÍFICO
-        else:
-            self.logger.info(f"🔍 FASE 2: Identificando problema específico para {state.get('incident_type')}...")
-            return await self._execute_phase_2_with_state(state)
-    
-    async def _execute_phase_1(self, state: EroskiState) -> IncidentTypeDecision:
-        """Ejecutar FASE 1: Identificación del tipo"""
-        
-        auth_data = state.get("auth_data_collected", {})
-        
-        # Preparar datos para el prompt
-        prompt_data = {
-            "employee_name": auth_data.get("name", "No especificado"),
-            "section": auth_data.get("section", "No especificado"),
-            "store_name": auth_data.get("store_name", "No especificado"),
-            "equipment_types": self._get_equipment_types_list(),
-            "conversation_history": self._format_conversation_history(state),
-            "user_message": self._get_last_user_message(state)
-        }
-        
-        # Ejecutar LLM Fase 1
-        formatted_prompt = self.phase1_prompt.format(**prompt_data)
-        response = await self.llm.ainvoke(formatted_prompt)
-        
-        # Parsear respuesta
-        decision_data = self.phase1_parser.parse(response.content)
-        return IncidentTypeDecision(**decision_data)
-    
-    async def _execute_phase_2_with_state(self, state: EroskiState) -> Command:
-        """Ejecutar FASE 2: Identificación del problema específico"""
-        
-        incident_type = state.get("incident_type")
-        if not incident_type:
-            self.logger.error("❌ FASE 2 llamada sin incident_type en el estado")
-            return self._escalate_error(state)
-        
-        # Preparar datos para FASE 2
-        prompt_data = {
-            "incident_type": incident_type,
-            "phase1_additional_info": state.get("additional_info", "Ninguna"),
-            "phase1_confidence": "Alta",  # Si llegamos aquí, la fase 1 tuvo alta confianza
-            "specific_problems_catalog": self._get_specific_problems_for_type(incident_type),
-            "conversation_history": self._format_conversation_history(state),
-            "user_message": self._get_last_user_message(state)
-        }
-        
-        # Ejecutar LLM Fase 2
-        formatted_prompt = self.phase2_prompt.format(**prompt_data)
-        response = await self.llm.ainvoke(formatted_prompt)
-        
-        # Parsear respuesta
-        decision_data = self.phase2_parser.parse(response.content)
-        phase2_result = SpecificProblemDecision(**decision_data)
-        
-        self.logger.info(f"✅ FASE 2 COMPLETADA: {phase2_result.problem_description}")
-        
-        # Procesar resultado de FASE 2
-        return self._process_phase2_result(state, phase2_result)
-    
-    def _update_state_after_phase1(self, state: EroskiState, phase1_result: IncidentTypeDecision) -> EroskiState:
-        """Actualizar estado después de FASE 1"""
-        
-        updated_state = dict(state)
-        
-        # Actualizar campos del estado
-        updated_state.update({
-            "incident_type": phase1_result.incident_type,
-            "additional_info": phase1_result.additional_info,
-            "confidence_score": phase1_result.confidence_level,
-            "last_activity": datetime.now()
-        })
-        
-        return EroskiState(updated_state)
-    
-    def _process_phase2_result(self, state: EroskiState, phase2_result: SpecificProblemDecision) -> Command:
-        """Procesar resultado de FASE 2 y generar respuesta"""
-        
-        # Actualizar estado con resultado de FASE 2
-        updated_state = dict(state)
-        updated_state.update({
-            "incident_description": phase2_result.problem_description,
-            "solution_found": phase2_result.solution_available,
-            "solution_content": phase2_result.proposed_solution,
-            "last_activity": datetime.now()
-        })
-        
-        # Combinar información adicional de ambas fases
-        existing_additional_info = updated_state.get("additional_info", "")
-        new_additional_info = phase2_result.additional_info or ""
-        
-        if new_additional_info and existing_additional_info:
-            combined_info = f"{existing_additional_info} | {new_additional_info}"
-        else:
-            combined_info = new_additional_info or existing_additional_info
-        
-        updated_state["additional_info"] = combined_info
-        
-        # Decidir próxima acción basada en el resultado
-        if phase2_result.next_action == "provide_solution" and phase2_result.solution_available:
-            return self._provide_solution(updated_state, phase2_result)
-        
-        elif phase2_result.next_action == "ask_details":
-            return self._ask_for_problem_details(updated_state, phase2_result)
-        
-        elif phase2_result.next_action == "escalate":
-            return self._escalate_complex_problem(updated_state, phase2_result)
-        
-        else:
-            # Fallback: pedir más detalles
-            return self._ask_for_problem_details(updated_state, phase2_result)
-    
-    def _provide_solution(self, state: EroskiState, phase2_result: SpecificProblemDecision) -> Command:
-        """Proporcionar solución identificada"""
-        
-        incident_code = state.get("incident_code", "N/A")
-        
-        solution_message = f"""✅ **Problema identificado: {state.get('incident_type', '').title()}**
+    solution_message = f"""✅ **Problema identificado: {state.get('incident_type', '').title()}**
 
 📋 **Problema específico:** {phase2_result.specific_problem}
 
@@ -379,195 +16,73 @@ class TwoPhaseClassifier:
 {phase2_result.proposed_solution}
 
 🤔 **¿Quieres intentar esta solución?**
-• Responde **'sí'** para que te guíe paso a paso
-• Responde **'no entiendo'** si necesitas más explicación
-• Responde **'ya lo intenté'** si ya probaste esto
+- Responde **'sí'** para que te guíe paso a paso
+- Responde **'no entiendo'** si necesitas más explicación
+- Responde **'ya lo intenté'** si ya probaste esto
 
 📋 *Código de incidencia: {incident_code}*"""
-        
-        return Command(
-            update={
-                "messages": state["messages"] + [AIMessage(content=solution_message)],
-                "current_step": "verify_solution",
-                "awaiting_user_input": True,
-                "solution_provided": True
-            }
-        )
-    
-    def _ask_for_problem_details(self, state: EroskiState, phase2_result: SpecificProblemDecision) -> Command:
-        """Pedir más detalles sobre el problema"""
-        
-        incident_type = state.get("incident_type", "equipo")
-        
-        if phase2_result.problem_description == "otros":
-            # Problema no catalogado
-            message = f"""🔍 **Problema con {incident_type.title()} - Información adicional necesaria**
 
-He identificado que tienes un problema con **{incident_type}**, pero necesito más detalles específicos para ayudarte mejor.
-
-📋 **Por favor, describe:**
-• ¿Qué síntomas observas exactamente?
-• ¿Cuándo empezó el problema?
-• ¿Has intentado algo para solucionarlo?
-• ¿Aparece algún mensaje de error?
-
-💡 *Cuanto más específico seas, mejor podré ayudarte*"""
-        
-        else:
-            # Información insuficiente para identificar problema específico
-            available_problems = self._get_specific_problems_for_type(incident_type)
-            
-            message = f"""🔍 **Problema con {incident_type.title()} - ¿Cuál es tu caso específico?**
-
-He identificado que el problema es con **{incident_type}**. Para darte la solución exacta, ¿cuál de estos describe mejor tu situación?
-
-{available_problems}
-
-📝 **O describe tu problema con más detalle si no coincide con ninguno de estos.**"""
-        
-        return Command(
-            update={
-                "messages": state["messages"] + [AIMessage(content=message)],
-                "current_step": "collect_details",
-                "awaiting_user_input": True
-            }
-        )
-    
-    # ========== MÉTODOS AUXILIARES ==========
-    
-    def _get_equipment_types_list(self) -> str:
-        """Obtener lista formateada de tipos de equipos"""
-        return """
-• **Balanza** - Equipos de pesado y etiquetado
-• **TPV** - Terminales de punto de venta (cajas)
-• **Impresora** - Impresoras de tickets, etiquetas, códigos de barras
-• **Ordenador** - PCs, terminales, tablets
-• **Red** - Problemas de conectividad, WiFi, internet
-• **Teléfono** - Teléfonos fijos, intercomunicadores
-• **Otros** - Otros equipos técnicos
-"""
-    
-    def _get_specific_problems_for_type(self, incident_type: str) -> str:
-        """Obtener problemas específicos para un tipo de equipo"""
-        
-        problems_catalog = {
-            "balanza": """
-• **La balanza no imprime etiquetas**
-• **La balanza no se enciende**
-• **El peso mostrado es incorrecto**
-• **Error de calibración**
-• **La pantalla no responde**
-• **Las etiquetas salen en blanco**
-• **Problemas con el teclado de la balanza**
-""",
-            "tpv": """
-• **El TPV no enciende**
-• **No lee tarjetas de crédito**
-• **Error en el cajón de efectivo**
-• **Problemas con el lector de códigos de barras**
-• **La pantalla táctil no responde**
-• **No imprime tickets**
-• **Error de comunicación con el servidor**
-""",
-            "impresora": """
-• **No imprime documentos**
-• **Impresión borrosa o con líneas**
-• **Atasco de papel**
-• **Error de tinta o tóner**
-• **No reconoce el formato de papel**
-• **Problemas de conectividad**
-""",
-            "red": """
-• **Sin conexión a internet**
-• **WiFi muy lento**
-• **No puede acceder a aplicaciones corporativas**
-• **Error de conexión intermitente**
-• **Problemas con VPN**
-""",
-            "ordenador": """
-• **El ordenador no enciende**
-• **Pantalla azul o error del sistema**
-• **Muy lento al trabajar**
-• **No reconoce dispositivos USB**
-• **Problemas con aplicaciones específicas**
-""",
-            "telefono": """
-• **No hay línea telefónica**
-• **No se escucha al otro lado**
-• **Problemas con extensiones internas**
-• **Error en el sistema de intercomunicación**
-"""
-        }
-        
-        return problems_catalog.get(incident_type, "• Problemas técnicos diversos")
-    
-    def _format_conversation_history(self, state: EroskiState) -> str:
-        """Formatear historial de conversación"""
-        messages = state.get("messages", [])
-        formatted = []
-        
-        for msg in messages:
-            if isinstance(msg, HumanMessage):
-                formatted.append(f"👤 Usuario: {msg.content}")
-            elif isinstance(msg, AIMessage):
-                formatted.append(f"🤖 Asistente: {msg.content}")
-        
-        return "\n".join(formatted) if formatted else "Sin historial previo"
-    
-    def _get_last_user_message(self, state: EroskiState) -> str:
-        """Obtener último mensaje del usuario"""
-        messages = state.get("messages", [])
-        
-        for msg in reversed(messages):
-            if isinstance(msg, HumanMessage):
-                return msg.content
-        
-        return ""
-
-# =============================================================================
-# INTEGRACIÓN CON EL NODO CLASSIFY
-# =============================================================================
-
-async def execute_two_phase_classification(state: EroskiState) -> Command:
-    """
-    Función principal para ejecutar clasificación en dos fases
-    
-    Args:
-        state: Estado actual con EroskiState
-        
-    Returns:
-        Command con estado actualizado
-    """
-    
-    classifier = TwoPhaseClassifier()
-    return await classifier.classify_incident(state)
-
-# =============================================================================
-# EJEMPLO DE USO EN EL NODO CLASSIFY
-# =============================================================================
-
-# En nodes/classify_llm_driven.py, reemplazar el método principal por:
-
-async def execute(self, state: EroskiState) -> Command:
-    """
-    Ejecutar clasificación usando el sistema de dos fases
-    """
-    
-    self.logger.info("🚀 Iniciando clasificación en dos fases")
-    
+    # ✅ ACTUALIZAR PERSISTENCIA COMPLETA CON MENSAJES
     try:
-        # Generar código de incidencia si no existe
-        if not state.get("incident_code"):
-            incident_code = self.code_manager.generate_unique_code()
-            state = {**state, "incident_code": incident_code}
-            self._initialize_incident_with_helpers(state, incident_code)
+        from pathlib import Path
+        import json
+        from datetime import datetime
+        from langchain_core.messages import HumanMessage, AIMessage
         
-        # Ejecutar clasificación en dos fases
-        return await execute_two_phase_classification(state)
+        incidents_file = Path("incidents_database.json")
+        
+        if incidents_file.exists():
+            with open(incidents_file, 'r', encoding='utf-8') as f:
+                incidents_data = json.load(f)
+            
+            if incident_code in incidents_data:
+                
+                # Actualizar datos de clasificación
+                incidents_data[incident_code].update({
+                    "tipo_incidencia": state.get("incident_type"),
+                    "problema_especifico": phase2_result.specific_problem,
+                    "solucion_aplicada": phase2_result.proposed_solution,
+                    "estado_solucion": "propuesta",
+                    "timestamp_actualizacion": datetime.now().isoformat()
+                })
+                
+                # ✅ GUARDAR TODOS LOS MENSAJES
+                messages = state.get("messages", [])
+                all_messages = messages + [AIMessage(content=solution_message)]
+                
+                serialized_messages = []
+                for msg in all_messages:
+                    if isinstance(msg, HumanMessage):
+                        serialized_messages.append({
+                            "tipo": "usuario",
+                            "contenido": msg.content,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                    elif isinstance(msg, AIMessage):
+                        serialized_messages.append({
+                            "tipo": "bot",
+                            "contenido": msg.content,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                
+                incidents_data[incident_code]["mensajes"] = serialized_messages
+                
+                with open(incidents_file, 'w', encoding='utf-8') as f:
+                    json.dump(incidents_data, f, indent=2, ensure_ascii=False)
+                
+                self.logger.info(f"✅ Persistencia y mensajes actualizados para {incident_code}")
+                self.logger.info(f"   - Mensajes guardados: {len(serialized_messages)}")
         
     except Exception as e:
-        self.logger.error(f"❌ Error en clasificación dos fases: {e}")
-        return self._handle_error(state, str(e))
+        self.logger.error(f"❌ Error actualizando persistencia: {e}")
+    
+    return Command(
+        update={
+            **state,
+            "messages": state["messages"] + [AIMessage(content=solution_message)],
+            "current_step": "verify_solution",
+            "awaiting_user_input": True,
+            "solution_provided": True
+        }
+    )
 
-
-        

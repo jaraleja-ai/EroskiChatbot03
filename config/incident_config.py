@@ -100,11 +100,10 @@ class IncidentConfigLoader:
     - Validar configuración
     - Proporcionar API de búsqueda
     """
-    
+
     def __init__(self, config_paths: Optional[List[str]] = None):
         self.config_paths = config_paths or [
-            "config/incident_types.json",
-            "config/eroski_incidents.json"  # Archivo específico de Eroski
+            "scripts/eroski_incidents.json"  # ✅ AÑADIR archivo con "problemas"
         ]
         
         self.incident_types: Dict[str, IncidentType] = {}
@@ -126,13 +125,10 @@ class IncidentConfigLoader:
         
         # Cargar configuración inicial
         self.load_config()
-    
+
     def load_config(self) -> bool:
         """
-        Cargar configuración desde todos los archivos JSON.
-        
-        Returns:
-            True si se cargó correctamente al menos un archivo
+        Cargar configuración desde todos los archivos JSON - VERSIÓN MEJORADA
         """
         try:
             self.stats["loads"] += 1
@@ -150,22 +146,12 @@ class IncidentConfigLoader:
                 self._load_default_config()
                 return False
             
-            # Convertir a objetos IncidentType
+            # ✅ CONVERSIÓN FLEXIBLE A OBJETOS IncidentType
             self.incident_types = {}
             for incident_id, incident_data in all_incident_types.items():
                 try:
-                    incident_type = IncidentType(
-                        id=incident_id,
-                        name=incident_data.get("name", incident_id),
-                        description=incident_data.get("description", ""),
-                        keywords=incident_data.get("keywords", []),
-                        urgency_level=incident_data.get("urgency_level", 2),
-                        category=incident_data.get("category", "general"),
-                        requires_technical_support=incident_data.get("requires_technical_support", False),
-                        estimated_resolution_minutes=incident_data.get("estimated_resolution_minutes"),
-                        common_issues=incident_data.get("common_issues"),
-                        escalation_contacts=incident_data.get("escalation_contacts")
-                    )
+                    # ✅ EXTRACCIÓN FLEXIBLE DE CAMPOS
+                    incident_type = self._create_incident_type(incident_id, incident_data)
                     self.incident_types[incident_id] = incident_type
                     
                 except Exception as e:
@@ -183,17 +169,10 @@ class IncidentConfigLoader:
             logger.error(f"❌ Error cargando configuración: {e}")
             self._load_default_config()
             return False
-    
+
     def _load_single_config(self, config_path: str, all_incident_types: Dict[str, Any]) -> bool:
         """
-        Cargar un archivo de configuración específico.
-        
-        Args:
-            config_path: Ruta del archivo
-            all_incident_types: Diccionario donde agregar los tipos
-            
-        Returns:
-            True si se cargó correctamente
+        Cargar un archivo de configuración específico - VERSIÓN FLEXIBLE
         """
         try:
             config_file = Path(config_path)
@@ -217,11 +196,17 @@ class IncidentConfigLoader:
             if not self._validate_config_structure(file_data, config_path):
                 return False
             
-            # Agregar tipos de incidencia
-            incident_types = file_data.get("incident_types", {})
+            # ✅ EXTRACCIÓN FLEXIBLE: Buscar la sección de incidencias
+            incident_types = self._extract_incident_types(file_data, config_path)
+            
+            if not incident_types:
+                logger.warning(f"⚠️ No se pudieron extraer tipos de {config_path}")
+                return False
+            
+            # Agregar tipos encontrados
             for incident_id, incident_data in incident_types.items():
                 if incident_id in all_incident_types:
-                    logger.warning(f"⚠️ Tipo duplicado '{incident_id}' en {config_path}")
+                    logger.warning(f"⚠️ Tipo duplicado '{incident_id}' en {config_path} (sobrescribiendo)")
                 
                 all_incident_types[incident_id] = incident_data
             
@@ -237,30 +222,55 @@ class IncidentConfigLoader:
         except Exception as e:
             logger.error(f"❌ Error cargando {config_path}: {e}")
             return False
-    
+
     def _validate_config_structure(self, data: Dict[str, Any], file_path: str) -> bool:
-        """Validar estructura del archivo de configuración"""
+        """
+        Validar estructura del archivo de configuración - VERSIÓN FLEXIBLE
+        Acepta múltiples estructuras:
+        1. {"incident_types": {...}}  - Estructura estándar
+        2. {"tipo_incidente": {...}}  - Estructura scripts/eroski_incidents.json
+        """
         try:
-            if "incident_types" not in data:
-                logger.error(f"❌ Falta sección 'incident_types' en {file_path}")
+            # ✅ BUSCAR CUALQUIER ESTRUCTURA VÁLIDA
+            incident_section = None
+            section_name = None
+            
+            # Intentar diferentes nombres de sección
+            possible_sections = ["incident_types", "tipo_incidente", "incidents", "tipos"]
+            
+            for section in possible_sections:
+                if section in data:
+                    incident_section = data[section]
+                    section_name = section
+                    break
+            
+            if incident_section is None:
+                logger.error(f"❌ No se encontró sección de incidencias en {file_path}")
+                logger.info(f"📋 Secciones disponibles: {list(data.keys())}")
                 return False
             
-            incident_types = data["incident_types"]
-            if not isinstance(incident_types, dict):
-                logger.error(f"❌ 'incident_types' debe ser diccionario en {file_path}")
+            if not isinstance(incident_section, dict):
+                logger.error(f"❌ La sección '{section_name}' debe ser diccionario en {file_path}")
                 return False
             
-            # Validar cada tipo
-            for incident_id, incident_data in incident_types.items():
-                if not self._validate_incident_type(incident_id, incident_data, file_path):
-                    return False
+            logger.info(f"✅ Encontrada sección '{section_name}' con {len(incident_section)} tipos en {file_path}")
+            
+            # ✅ VALIDACIÓN FLEXIBLE: Solo verificar que hay contenido válido
+            for incident_id, incident_data in incident_section.items():
+                if not isinstance(incident_data, dict):
+                    logger.warning(f"⚠️ Tipo '{incident_id}' no es diccionario en {file_path}")
+                    continue
+                    
+                # Validación mínima: debe tener al menos nombre o descripción
+                if not incident_data.get("name") and not incident_data.get("description"):
+                    logger.warning(f"⚠️ Tipo '{incident_id}' sin nombre ni descripción en {file_path}")
             
             return True
             
         except Exception as e:
             logger.error(f"❌ Error validando {file_path}: {e}")
             return False
-    
+
     def _validate_incident_type(self, incident_id: str, incident_data: Dict, file_path: str) -> bool:
         """Validar un tipo de incidencia específico"""
         required_fields = ["name", "description", "keywords"]
@@ -325,6 +335,65 @@ class IncidentConfigLoader:
         
         self.incident_types = default_types
     
+    def _extract_incident_types(self, data: Dict[str, Any], file_path: str) -> Dict[str, Any]:
+        """
+        Extraer tipos de incidencia de cualquier estructura de archivo
+        """
+        
+        # ✅ BUSCAR EN DIFERENTES UBICACIONES
+        possible_sections = ["incident_types", "tipo_incidente", "incidents", "tipos"]
+        
+        for section_name in possible_sections:
+            if section_name in data:
+                section_data = data[section_name]
+                logger.info(f"📁 Extrayendo desde sección '{section_name}' en {file_path}")
+                return section_data
+        
+        # Si no encuentra secciones conocidas, buscar cualquier diccionario grande
+        for key, value in data.items():
+            if isinstance(value, dict) and len(value) > 0:
+                # Verificar si parece una sección de incidencias
+                first_item = next(iter(value.values()))
+                if isinstance(first_item, dict) and ("name" in first_item or "description" in first_item):
+                    logger.info(f"📁 Detectada posible sección de incidencias: '{key}' en {file_path}")
+                    return value
+        
+        logger.warning(f"⚠️ No se encontró sección de incidencias válida en {file_path}")
+        return {}
+
+    def _create_incident_type(self, incident_id: str, incident_data: Dict[str, Any]) -> IncidentType:
+        """
+        Crear objeto IncidentType desde cualquier estructura de datos
+        """
+        
+        # ✅ EXTRACCIÓN FLEXIBLE CON FALLBACKS
+        name = incident_data.get("name", incident_data.get("nombre", incident_id.title()))
+        description = incident_data.get("description", incident_data.get("descripcion", f"Problemas con {incident_id}"))
+        keywords = incident_data.get("keywords", incident_data.get("palabras_clave", [incident_id]))
+        
+        # ✅ MANEJO ESPECIAL PARA "PROBLEMAS" (estructura scripts/)
+        common_issues = incident_data.get("common_issues", [])
+        
+        # Si tiene "problemas" (estructura nueva), convertir a common_issues
+        if "problemas" in incident_data:
+            problemas = incident_data["problemas"]
+            if isinstance(problemas, dict):
+                common_issues = list(problemas.keys())  # Solo los nombres de los problemas
+                logger.info(f"✅ Convertidos {len(common_issues)} problemas para {incident_id}")
+        
+        return IncidentType(
+            id=incident_id,
+            name=name,
+            description=description,
+            keywords=keywords if isinstance(keywords, list) else [keywords],
+            urgency_level=incident_data.get("urgency_level", incident_data.get("nivel_urgencia", 2)),
+            category=incident_data.get("category", incident_data.get("categoria", "general")),
+            requires_technical_support=incident_data.get("requires_technical_support", incident_data.get("requiere_soporte", False)),
+            estimated_resolution_minutes=incident_data.get("estimated_resolution_minutes", incident_data.get("tiempo_resolucion", None)),
+            common_issues=common_issues,
+            escalation_contacts=incident_data.get("escalation_contacts", incident_data.get("contactos_escalacion", []))
+        )
+
     def reload_if_changed(self) -> bool:
         """
         Recargar configuración si algún archivo cambió.
