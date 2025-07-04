@@ -1,304 +1,244 @@
-# =====================================================
-# nodes/authenticate_llm_driven.py - Nodo de Autenticación LLM-Driven SIMPLIFICADO
-# =====================================================
-"""
-Nodo de autenticación simplificado que funciona como wrapper.
-Esta versión garantiza compatibilidad mientras se desarrolla la versión completa.
-"""
-
-from typing import Dict, Any, Optional
-from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.types import Command
-from datetime import datetime
-import logging
-
-from models.eroski_state import EroskiState
-
-
-# =============================================================================
-# LOGGER
-# =============================================================================
-
-logger = logging.getLogger("LLMDrivenAuth")
-
-
-# =============================================================================
-# NODO SIMPLIFICADO PARA COMPATIBILIDAD
-# =============================================================================
-
-async def llm_driven_authenticate_node(state: EroskiState) -> Command:
-    """
-    Nodo de autenticación LLM-driven simplificado.
+async def _search_database_and_continue(self, state: EroskiState, decision: ConversationDecision, base_update: Dict) -> Command:
+    """Buscar en BD y continuar - LÓGICA INTELIGENTE"""
     
-    Esta versión funciona como wrapper temporal mientras se implementa 
-    la versión completa con LLM.
+    email = decision.extracted_data.get("email")
+    self.logger.info(f"🔍 Ejecutando búsqueda en BD para: {email}")
     
-    Args:
-        state: Estado actual del workflow
+    try:
+        # 1. BUSCAR EN BASE DE DATOS
+        db_result = await self._search_employee_database(email)
         
-    Returns:
-        Command con la actualización del estado
-    """
-    
-    logger.info("🔑 Ejecutando nodo de autenticación LLM-driven")
-    
-    # 1. VERIFICAR SI YA ESTÁ AUTENTICADO
-    if _is_authentication_complete(state):
-        logger.info("✅ Usuario ya autenticado - continuando")
-        return Command(update={
-            "current_node": "authenticate",
-            "awaiting_user_input": False,
-            "last_activity": datetime.now()
-        })
-    
-    # 2. PRIMERA VISITA - MENSAJE DE BIENVENIDA
-    if _is_first_visit(state):
-        logger.info("👋 Primera visita - enviando mensaje de bienvenida")
-        
-        welcome_message = """¡Hola! Soy el asistente de incidencias de Eroski 🤖
-
-Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona:
-
-📧 **Tu email corporativo** (@eroski.es)
-🏪 **Tu tienda** (nombre o código)
-🏢 **Tu sección/departamento**
-
-¿Podrías compartir esta información conmigo?"""
-        
-        return Command(update={
-            "current_node": "authenticate",
-            "messages": [AIMessage(content=welcome_message)],
-            "awaiting_user_input": True,
-            "auth_conversation_started": True,
-            "attempts": 1,
-            "auth_data_collected": {},
-            "last_activity": datetime.now()
-        })
-    
-    # 3. PROCESAR MENSAJE DEL USUARIO
-    last_message = _get_last_user_message(state)
-    
-    if last_message:
-        logger.info(f"📨 Procesando mensaje del usuario: {last_message[:50]}...")
-        
-        # Extraer datos del mensaje
-        extracted_data = _extract_user_data(last_message)
-        
-        # Combinar con datos ya recopilados
-        auth_data = state.get("auth_data_collected", {})
-        auth_data.update(extracted_data)
-        
-        # Verificar si tenemos datos suficientes
-        missing_fields = _check_missing_fields(auth_data)
-        
-        if not missing_fields:
-            # DATOS COMPLETOS - SIMULAR VALIDACIÓN
-            logger.info("✅ Datos completos - validando usuario")
+        if db_result.get("found"):
+            # 2. USUARIO ENCONTRADO EN BD - COMPLETAR CON DATOS DE BD
+            employee = db_result["employee"]
+            self.logger.info(f"✅ Usuario encontrado en BD: {employee.get('name')}")
             
-            # Simular datos del empleado (reemplazar con búsqueda real en BD)
-            employee_data = _simulate_employee_lookup(auth_data)
+            # Combinar datos de BD con datos extraídos por LLM
+            enhanced_data = {
+                **base_update["auth_data_collected"],
+                "name": employee.get("name", decision.extracted_data.get("name")),
+                "email": email,
+                "employee_id": employee.get("id"),
+                "store_name": employee.get("store_name"),
+                "section": decision.extracted_data.get("section", "Por especificar"),
+                "found_in_database": True
+            }
             
-            success_message = f"""✅ **Usuario autenticado correctamente**
+            # Mensaje personalizado con datos de BD
+            success_message = f"""✅ **¡Perfecto {employee.get('name', 'usuario')}!** Te he encontrado en el sistema.
 
-Bienvenido **{employee_data['name']}** de **{employee_data['store_name']}**
+**Datos confirmados:**
+👤 **Nombre:** {employee.get('name')}
+🏪 **Tienda:** {employee.get('store_name')}
+📧 **Email:** {email}
 
-¿En qué puedo ayudarte hoy?"""
+Ahora cuéntame: **¿qué problema técnico necesitas reportar?** 🔧"""
             
-            return Command(update={
-                "current_node": "authenticate",
-                "messages": [AIMessage(content=success_message)],
+            # COMPLETAR AUTENTICACIÓN
+            base_update.update({
+                "auth_data_collected": enhanced_data,
                 "authenticated": True,
-                "employee_name": employee_data["name"],
-                "employee_email": employee_data["email"],
-                "employee_id": employee_data.get("id", "TEMP001"),
-                "incident_store_name": employee_data["store_name"],
-                "incident_section": employee_data["section"],
-                "store_id": employee_data.get("store_id", "TEMP001"),
                 "authentication_stage": "completed",
                 "datos_usuario_completos": True,
-                "awaiting_user_input": False,
-                "auth_data_collected": auth_data,
-                "last_activity": datetime.now()
+                "ready_for_classification": True,
+                "awaiting_user_input": False,  # ✅ NO esperar más input
+                "employee_name": employee.get('name'),
+                "incident_store_name": employee.get('store_name'),
+                "incident_section": enhanced_data.get("section"),
+                "incident_email": email,
+                "found_in_database": True,
+                "employee_data": employee,
+                "messages": state.get("messages", []) + [AIMessage(content=success_message)]
             })
+            
+            return Command(update=base_update)
         
         else:
-            # FALTAN DATOS - SOLICITAR MÁS INFORMACIÓN
-            logger.info(f"📋 Faltan datos: {missing_fields}")
+            # 3. USUARIO NO ENCONTRADO - CONTINUAR INTELIGENTEMENTE
+            self.logger.info(f"❌ Usuario no encontrado en BD: {email}")
             
-            request_message = _generate_data_request_message(missing_fields, auth_data)
+            # ✅ LÓGICA INTELIGENTE: Verificar qué campos YA TENEMOS
+            current_data = base_update["auth_data_collected"]
             
-            return Command(update={
-                "current_node": "authenticate",
-                "messages": [AIMessage(content=request_message)],
-                "awaiting_user_input": True,
-                "auth_data_collected": auth_data,
-                "attempts": state.get("attempts", 0) + 1,
-                "last_activity": datetime.now()
-            })
+            # Verificar campos obligatorios
+            has_name = bool(current_data.get("name"))
+            has_store = bool(current_data.get("store_name"))
+            has_section = bool(current_data.get("section"))
+            
+            self.logger.info(f"📋 Campos actuales - Nombre: {has_name}, Tienda: {has_store}, Sección: {has_section}")
+            
+            # ✅ DETERMINAR QUE CAMPOS FALTAN
+            missing_fields = []
+            if not has_name:
+                missing_fields.append("nombre completo")
+            if not has_store:
+                missing_fields.append("nombre de tu tienda")
+            if not has_section:
+                missing_fields.append("sección donde ocurrió el problema")
+            
+            # ✅ GENERAR MENSAJE INTELIGENTE SEGÚN LO QUE FALTA
+            if not missing_fields:
+                # YA TENEMOS TODO - COMPLETAR AUTENTICACIÓN
+                self.logger.info("✅ Todos los campos están completos, finalizando autenticación")
+                return self._complete_authentication_with_manual_data(state, current_data, base_update)
+            
+            else:
+                # FALTAN CAMPOS - PEDIRLOS ESPECÍFICAMENTE
+                return self._request_missing_fields_intelligently(state, current_data, missing_fields, base_update)
     
-    # 4. FALLBACK - SOLICITAR INFORMACIÓN NUEVAMENTE
-    logger.warning("⚠️ No se pudo procesar el mensaje - solicitando información nuevamente")
-    
-    fallback_message = """No he podido entender tu mensaje anterior.
+    except Exception as e:
+        self.logger.error(f"❌ Error en búsqueda BD: {e}")
+        return self._handle_database_error(state, base_update, str(e))
 
-Por favor, proporciona:
-📧 Tu email corporativo (@eroski.es)
-🏪 Tu tienda
-🏢 Tu sección/departamento
-
-¿Podrías intentar de nuevo?"""
+def _complete_authentication_with_manual_data(self, state: EroskiState, current_data: Dict, base_update: Dict) -> Command:
+    """Completar autenticación con datos manuales cuando ya tenemos todo"""
     
-    return Command(update={
-        "current_node": "authenticate",
-        "messages": [AIMessage(content=fallback_message)],
-        "awaiting_user_input": True,
-        "attempts": state.get("attempts", 0) + 1,
-        "last_activity": datetime.now()
+    confirmation_message = f"""✅ **¡Información recopilada correctamente!**
+
+👤 **Empleado:** {current_data.get('name')}
+📧 **Email:** {current_data.get('email')}
+🏪 **Tienda:** {current_data.get('store_name')}
+📍 **Sección:** {current_data.get('section')}
+
+Ahora cuéntame: **¿qué problema técnico estás experimentando?** 🔧"""
+    
+    base_update.update({
+        "authenticated": True,
+        "authentication_stage": "completed",
+        "datos_usuario_completos": True,
+        "ready_for_classification": True,
+        "awaiting_user_input": False,  # ✅ NO esperar más input - CONTINUAR
+        "employee_name": current_data.get('name'),
+        "incident_store_name": current_data.get('store_name'),
+        "incident_section": current_data.get('section'),
+        "incident_email": current_data.get('email'),
+        "found_in_database": False,
+        "messages": state.get("messages", []) + [AIMessage(content=confirmation_message)]
     })
-
-
-# =============================================================================
-# FUNCIONES AUXILIARES
-# =============================================================================
-
-def _is_authentication_complete(state: EroskiState) -> bool:
-    """Verificar si la autenticación ya está completa"""
-    return (
-        state.get("authentication_stage") == "completed" and
-        state.get("datos_usuario_completos") and
-        state.get("employee_name") and
-        state.get("incident_store_name") and
-        state.get("incident_section")
-    )
-
-
-def _is_first_visit(state: EroskiState) -> bool:
-    """Verificar si es la primera visita al nodo"""
-    return not state.get("auth_conversation_started", False)
-
-
-def _get_last_user_message(state: EroskiState) -> Optional[str]:
-    """Obtener el último mensaje del usuario"""
-    messages = state.get("messages", [])
     
-    for message in reversed(messages):
-        if hasattr(message, 'type') and message.type == "human":
-            return message.content
-        elif isinstance(message, HumanMessage):
-            return message.content
-    
-    return None
+    return Command(update=base_update)
 
-
-def _extract_user_data(message: str) -> Dict[str, Any]:
-    """Extraer datos del usuario del mensaje (versión simplificada)"""
-    import re
+def _request_missing_fields_intelligently(self, state: EroskiState, current_data: Dict, missing_fields: List[str], base_update: Dict) -> Command:
+    """Pedir solo los campos que faltan de forma inteligente"""
     
-    data = {}
-    message_lower = message.lower()
+    # ✅ CONSTRUIR MENSAJE PERSONALIZADO SEGÚN LO QUE YA TENEMOS
     
-    # Buscar email
-    email_match = re.search(r'([a-zA-Z0-9._%+-]+@eroski\.es)', message)
-    if email_match:
-        data["email"] = email_match.group(1)
-    
-    # Buscar nombre (patrón simple)
-    if "soy" in message_lower:
-        name_match = re.search(r'soy\s+([a-záéíóúñ\s]+)', message_lower)
-        if name_match:
-            data["name"] = name_match.group(1).strip().title()
-    
-    # Buscar tienda
-    if "eroski" in message_lower and ("centro" in message_lower or "tienda" in message_lower or "madrid" in message_lower):
-        # Buscar patrones como "Eroski Madrid Centro"
-        store_match = re.search(r'eroski\s+([a-záéíóúñ\s]+)', message_lower)
-        if store_match:
-            data["store_name"] = f"Eroski {store_match.group(1).strip().title()}"
-    
-    # Buscar sección
-    sections = ["carnicería", "pescadería", "frutería", "panadería", "charcutería", "caja", "reposición", "seguridad", "administración", "it", "informática"]
-    for section in sections:
-        if section in message_lower:
-            data["section"] = section.capitalize()
-            break
-    
-    return data
-
-
-def _check_missing_fields(auth_data: Dict[str, Any]) -> list:
-    """Verificar qué campos faltan"""
-    required_fields = ["email", "name", "store_name", "section"]
-    missing = []
-    
-    for field in required_fields:
-        if not auth_data.get(field):
-            missing.append(field)
-    
-    return missing
-
-
-def _generate_data_request_message(missing_fields: list, current_data: Dict[str, Any]) -> str:
-    """Generar mensaje solicitando datos faltantes"""
-    
-    # Confirmar datos ya recibidos
-    confirmation_parts = []
+    # Mostrar lo que ya tenemos
+    confirmed_parts = []
     if current_data.get("name"):
-        confirmation_parts.append(f"👤 Nombre: {current_data['name']}")
+        confirmed_parts.append(f"👤 **Nombre:** {current_data['name']}")
     if current_data.get("email"):
-        confirmation_parts.append(f"📧 Email: {current_data['email']}")
+        confirmed_parts.append(f"📧 **Email:** {current_data['email']}")
     if current_data.get("store_name"):
-        confirmation_parts.append(f"🏪 Tienda: {current_data['store_name']}")
+        confirmed_parts.append(f"🏪 **Tienda:** {current_data['store_name']}")
     if current_data.get("section"):
-        confirmation_parts.append(f"🏢 Sección: {current_data['section']}")
+        confirmed_parts.append(f"📍 **Sección:** {current_data['section']}")
     
-    # Solicitar datos faltantes
-    request_parts = []
-    if "name" in missing_fields:
-        request_parts.append("👤 Tu nombre completo")
-    if "email" in missing_fields:
-        request_parts.append("📧 Tu email corporativo (@eroski.es)")
-    if "store_name" in missing_fields:
-        request_parts.append("🏪 Tu tienda")
-    if "section" in missing_fields:
-        request_parts.append("🏢 Tu sección/departamento")
+    confirmed_text = "\n".join(confirmed_parts) if confirmed_parts else ""
     
-    message = "Perfecto, he registrado:\n\n"
-    if confirmation_parts:
-        message += "\n".join(confirmation_parts)
+    # ✅ PEDIR SOLO LO QUE FALTA
+    if len(missing_fields) == 1:
+        missing_text = f"tu **{missing_fields[0]}**"
+    elif len(missing_fields) == 2:
+        missing_text = f"tu **{missing_fields[0]}** y **{missing_fields[1]}**"
+    else:
+        missing_text = f"tu **{', '.join(missing_fields[:-1])}** y **{missing_fields[-1]}**"
     
-    message += "\n\nPara completar tu identificación, necesito:\n\n"
-    message += "\n".join(request_parts)
+    # Construir mensaje
+    if confirmed_text:
+        message = f"""Perfecto, ya tengo algunos datos:
+
+{confirmed_text}
+
+Para completar tu información, necesito que me proporciones {missing_text}.
+
+**Ejemplo:** "Trabajo en Eroski Madrid Centro en la sección de carnicería" """
+    else:
+        message = f"""Tu email no está en nuestra base de datos, pero no hay problema. 👍
+
+Para continuar, necesito que me proporciones {missing_text}.
+
+**Ejemplo:** "Soy María García, trabajo en Eroski Madrid Centro en panadería" """
     
-    return message
-
-
-def _simulate_employee_lookup(auth_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Simular búsqueda en base de datos (reemplazar con función real)"""
+    base_update.update({
+        "awaiting_user_input": True,  # ✅ Esperar más información específica
+        "found_in_database": False,
+        "missing_fields": missing_fields,  # Guardar qué campos faltan
+        "messages": state.get("messages", []) + [AIMessage(content=message)]
+    })
     
-    # Datos simulados basados en la información proporcionada
-    return {
-        "id": "EMP001",
-        "name": auth_data.get("name", "Usuario Temporal"),
-        "email": auth_data.get("email", "temp@eroski.es"),
-        "store_id": "STORE001",
-        "store_name": auth_data.get("store_name", "Eroski Temporal"),
-        "section": auth_data.get("section", "General"),
-        "department": auth_data.get("section", "General"),
-        "level": 2
-    }
+    return Command(update=base_update)
 
+def _handle_database_error(self, state: EroskiState, base_update: Dict, error: str) -> Command:
+    """Manejar error de base de datos de forma inteligente"""
+    
+    current_data = base_update["auth_data_collected"]
+    
+    # Verificar qué campos faltan aún con el error
+    missing_fields = []
+    if not current_data.get("name"):
+        missing_fields.append("nombre completo")
+    if not current_data.get("store_name"):
+        missing_fields.append("nombre de tu tienda")
+    if not current_data.get("section"):
+        missing_fields.append("sección donde trabajas")
+    
+    if not missing_fields:
+        # Tenemos todo, continuar a pesar del error
+        error_message = """Ha habido un problema técnico al verificar tu email, pero ya tengo toda tu información necesaria. 👍
 
-# =============================================================================
-# WRAPPER FUNCTION PARA COMPATIBILIDAD
-# =============================================================================
+¡Continuemos! **¿Qué problema técnico estás experimentando?** 🔧"""
+        
+        base_update.update({
+            "awaiting_user_input": False,  # Continuar
+            "authentication_stage": "completed",
+            "datos_usuario_completos": True,
+            "database_error": error
+        })
+    else:
+        # Faltan campos, pedirlos
+        missing_text = ", ".join(missing_fields)
+        error_message = f"""Ha ocurrido un error técnico al verificar tu email. 😔
 
-def authenticate_employee_node():
-    """Función wrapper para compatibilidad con importaciones anteriores"""
-    return llm_driven_authenticate_node
+No te preocupes, puedo ayudarte igualmente. Necesito que me proporciones: **{missing_text}**.
 
+**Ejemplo:** "Soy Juan García, trabajo en Eroski Bilbao Centro en carnicería" """
+        
+        base_update.update({
+            "awaiting_user_input": True,
+            "database_error": error
+        })
+    
+    base_update["messages"] = state.get("messages", []) + [AIMessage(content=error_message)]
+    
+    return Command(update=base_update)
 
-# =============================================================================
-# EXPORTS
-# =============================================================================
+# =====================================================
+# EJEMPLO DE FLUJOS CON LA NUEVA LÓGICA
+# =====================================================
 
-__all__ = ["llm_driven_authenticate_node", "authenticate_employee_node"]
+"""
+FLUJO 1: Usuario da email + todos los datos
+Usuario: "juan@eroski.es, soy Juan García, trabajo en Eroski Madrid Centro en carnicería"
+→ BD: No encontrado
+→ Sistema: ✅ Ya tengo todo (nombre, tienda, sección)
+→ Respuesta: "¡Información completa! ¿Qué problema tienes?"
+
+FLUJO 2: Usuario da solo email
+Usuario: "maria@empresa.com"  
+→ BD: No encontrado
+→ Sistema: ❌ Faltan nombre, tienda, sección
+→ Respuesta: "Tu email no está en BD. Necesito tu nombre completo, nombre de tienda y sección"
+
+FLUJO 3: Usuario da email + nombre
+Usuario: "pedro@test.com, soy Pedro López"
+→ BD: No encontrado  
+→ Sistema: ❌ Faltan tienda, sección
+→ Respuesta: "Perfecto Pedro, ya tengo tu nombre y email. Necesito nombre de tu tienda y sección"
+
+FLUJO 4: Usuario da email + nombre + tienda
+Usuario: "ana@test.com, soy Ana, trabajo en Eroski Sevilla Norte"
+→ BD: No encontrado
+→ Sistema: ❌ Solo falta sección  
+→ Respuesta: "Perfecto Ana, ya tengo tu nombre, email y tienda. Solo necesito la sección donde ocurrió el problema"
+"""
