@@ -133,7 +133,22 @@ class LLMDrivenAuthenticateNode(BaseNode):
             if self._is_first_visit(state):
 
                 self.logger.info(f"🌄Entra primera visita")
-                return await self._start_intelligent_conversation(state)
+                try:
+                    self.logger.info("🤖 Analizando primer mensaje con LLM...")
+                    decision = await self._get_llm_decision(state)
+                    
+                    # Si el LLM extrajo algún dato, procesarlo
+                    if decision.extracted_data and any(decision.extracted_data.values()):
+                        self.logger.info(f"🚀 LLM extrajo datos del primer mensaje: {decision.extracted_data}")
+                        return await self._execute_llm_decision(state, decision)
+                    else:
+                        self.logger.info("📋 LLM no extrajo datos, enviando bienvenida")
+                        return await self._start_intelligent_conversation(state)
+                        
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error analizando primer mensaje con LLM: {e}")
+                    return await self._start_intelligent_conversation(state)
+
             
             # 3. Continuar conversación dirigida por LLM
             return await self._continue_llm_conversation(state)
@@ -148,6 +163,9 @@ class LLMDrivenAuthenticateNode(BaseNode):
     
     async def _start_intelligent_conversation(self, state: EroskiState) -> Command:
         """Iniciar conversación inteligente"""
+        
+        existing_messages = state.get("messages", [])
+        self.logger.info(f"🌄JGL: _start_intelligent_conversation: {existing_messages}")    
         
         welcome_message = """¡Hola! 👋 Soy tu asistente de incidencias técnicas de Eroski.
 
@@ -289,33 +307,20 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
     # =========================================================================
     # ACCIONES ESPECÍFICAS
     # =========================================================================
+    
     async def _search_database_and_continue(self, state: EroskiState, decision: ConversationDecision, base_update: Dict) -> Command:
-        """Buscar en BD y continuar - LÓGICA INTELIGENTE"""
+        """Buscar en BD y continuar - VERSIÓN CORREGIDA"""
         
         email = decision.extracted_data.get("email")
         self.logger.info(f"🔍 Ejecutando búsqueda en BD para: {email}")
         
         try:
-            # 1. BUSCAR EN BASE DE DATOS
             db_result = await self._search_employee_database(email)
             
             if db_result.get("found"):
-                # 2. USUARIO ENCONTRADO EN BD - COMPLETAR CON DATOS DE BD
                 employee = db_result["employee"]
                 self.logger.info(f"✅ Usuario encontrado en BD: {employee.get('name')}")
                 
-                # Combinar datos de BD con datos extraídos por LLM
-                enhanced_data = {
-                    **base_update["auth_data_collected"],
-                    "name": employee.get("name", decision.extracted_data.get("name")),
-                    "email": email,
-                    "employee_id": employee.get("id"),
-                    "store_name": employee.get("store_name"),
-                    "section": decision.extracted_data.get("section", "Por especificar"),
-                    "found_in_database": True
-                }
-                
-                # Mensaje personalizado con datos de BD
                 success_message = f"""✅ **¡Perfecto {employee.get('name', 'usuario')}!** Te he encontrado en el sistema.
 
     **Datos confirmados:**
@@ -325,64 +330,62 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
 
     Ahora cuéntame: **¿qué problema técnico necesitas reportar?** 🔧"""
                 
-                # COMPLETAR AUTENTICACIÓN
+                # ✅ CONFIGURAR TODOS LOS CAMPOS REQUERIDOS PARA EL ROUTER
                 base_update.update({
-                    "auth_data_collected": enhanced_data,
-                    "authenticated": True,
-                    "authentication_stage": "completed",
-                    "datos_usuario_completos": True,
-                    "ready_for_classification": True,
-                    "awaiting_user_input": False,  # ✅ NO esperar más input
-                    "employee_name": employee.get('name'),
-                    "incident_store_name": employee.get('store_name'),
-                    "incident_section": enhanced_data.get("section"),
+                    # Campos para el router  
+                    "authentication_stage": "completed",           # ✅ OBLIGATORIO
+                    "datos_usuario_completos": True,               # ✅ OBLIGATORIO
+                    "ready_for_classification": True,              # ✅ OBLIGATORIO
+                    "awaiting_user_input": False,                  # ✅ CRÍTICO - NO esperar input
+                    
+                    # Campos de empleado requeridos por el router
+                    "employee_name": employee.get('name'),         # ✅ OBLIGATORIO
+                    "incident_store_name": employee.get('store_name'),  # ✅ OBLIGATORIO
+                    "incident_section": decision.extracted_data.get("section", "Por especificar"),  # ✅ OBLIGATORIO
                     "incident_email": email,
+                    
+                    # Datos específicos de BD
+                    "authenticated": True,
                     "found_in_database": True,
                     "employee_data": employee,
+                    "employee_id": employee.get("id"),
+                    
+                    # Datos combinados
+                    "auth_data_collected": {
+                        **base_update.get("auth_data_collected", {}),
+                        "name": employee.get("name"),
+                        "email": email,
+                        "store_name": employee.get("store_name"),
+                        "section": decision.extracted_data.get("section", "Por especificar"),
+                        "found_in_database": True
+                    },
+                    
+                    "current_node": "authenticate",
+                    "last_activity": datetime.now(),
                     "messages": state.get("messages", []) + [AIMessage(content=success_message)]
                 })
+                
+                # ✅ LOGGING PARA VERIFICAR
+                self.logger.info("✅ === COMPLETANDO AUTENTICACIÓN CON BD ===")
+                self.logger.info(f"✅ authentication_stage: {base_update['authentication_stage']}")
+                self.logger.info(f"✅ datos_usuario_completos: {base_update['datos_usuario_completos']}")
+                self.logger.info(f"✅ ready_for_classification: {base_update['ready_for_classification']}")
+                self.logger.info(f"✅ awaiting_user_input: {base_update['awaiting_user_input']}")
+                self.logger.info(f"✅ employee_name: {base_update['employee_name']}")
                 
                 return Command(update=base_update)
             
             else:
-                # 3. USUARIO NO ENCONTRADO - CONTINUAR INTELIGENTEMENTE
-                self.logger.info(f"❌ Usuario no encontrado en BD: {email}")
+                # Usuario no encontrado - continuar con lógica inteligente
+                return self._handle_user_not_found_logic(state, decision, base_update, email)
                 
-                # ✅ LÓGICA INTELIGENTE: Verificar qué campos YA TENEMOS
-                current_data = base_update["auth_data_collected"]
-                
-                # Verificar campos obligatorios
-                has_name = bool(current_data.get("name"))
-                has_store = bool(current_data.get("store_name"))
-                has_section = bool(current_data.get("section"))
-                
-                self.logger.info(f"📋 Campos actuales - Nombre: {has_name}, Tienda: {has_store}, Sección: {has_section}")
-                
-                # ✅ DETERMINAR QUE CAMPOS FALTAN
-                missing_fields = []
-                if not has_name:
-                    missing_fields.append("nombre completo")
-                if not has_store:
-                    missing_fields.append("nombre de tu tienda")
-                if not has_section:
-                    missing_fields.append("sección donde ocurrió el problema")
-                
-                # ✅ GENERAR MENSAJE INTELIGENTE SEGÚN LO QUE FALTA
-                if not missing_fields:
-                    # YA TENEMOS TODO - COMPLETAR AUTENTICACIÓN
-                    self.logger.info("✅ Todos los campos están completos, finalizando autenticación")
-                    return self._complete_authentication_with_manual_data(state, current_data, base_update)
-                
-                else:
-                    # FALTAN CAMPOS - PEDIRLOS ESPECÍFICAMENTE
-                    return self._request_missing_fields_intelligently(state, current_data, missing_fields, base_update)
-        
         except Exception as e:
             self.logger.error(f"❌ Error en búsqueda BD: {e}")
             return self._handle_database_error(state, base_update, str(e))
-   
+
+
     def _complete_authentication_with_manual_data(self, state: EroskiState, current_data: Dict, base_update: Dict) -> Command:
-        """Completar autenticación con datos manuales cuando ya tenemos todo"""
+        """Completar autenticación con datos manuales - VERSIÓN CORREGIDA"""
         
         confirmation_message = f"""✅ **¡Información recopilada correctamente!**
 
@@ -393,21 +396,40 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
 
     Ahora cuéntame: **¿qué problema técnico estás experimentando?** 🔧"""
         
+        # ✅ ASEGURAR QUE TODOS LOS CAMPOS REQUERIDOS ESTÉN CONFIGURADOS
         base_update.update({
-            "authenticated": True,
-            "authentication_stage": "completed",
-            "datos_usuario_completos": True,
-            "ready_for_classification": True,
-            "awaiting_user_input": False,  # ✅ NO esperar más input - CONTINUAR
-            "employee_name": current_data.get('name'),
-            "incident_store_name": current_data.get('store_name'),
-            "incident_section": current_data.get('section'),
+            # Campos para el router
+            "authentication_stage": "completed",           # ✅ OBLIGATORIO
+            "datos_usuario_completos": True,               # ✅ OBLIGATORIO
+            "ready_for_classification": True,              # ✅ OBLIGATORIO
+            "awaiting_user_input": False,                  # ✅ CRÍTICO - NO esperar input
+            
+            # Campos de empleado requeridos por el router
+            "employee_name": current_data.get('name'),     # ✅ OBLIGATORIO
+            "incident_store_name": current_data.get('store_name'),  # ✅ OBLIGATORIO
+            "incident_section": current_data.get('section'),       # ✅ OBLIGATORIO
             "incident_email": current_data.get('email'),
+            
+            # Otros campos
+            "authenticated": True,
             "found_in_database": False,
+            "current_node": "authenticate",
+            "last_activity": datetime.now(),
             "messages": state.get("messages", []) + [AIMessage(content=confirmation_message)]
         })
         
+        # ✅ LOGGING PARA VERIFICAR
+        self.logger.info("✅ === COMPLETANDO AUTENTICACIÓN MANUAL ===")
+        self.logger.info(f"✅ authentication_stage: {base_update['authentication_stage']}")
+        self.logger.info(f"✅ datos_usuario_completos: {base_update['datos_usuario_completos']}")
+        self.logger.info(f"✅ ready_for_classification: {base_update['ready_for_classification']}")
+        self.logger.info(f"✅ awaiting_user_input: {base_update['awaiting_user_input']}")
+        self.logger.info(f"✅ employee_name: {base_update['employee_name']}")
+        self.logger.info(f"✅ incident_store_name: {base_update['incident_store_name']}")
+        self.logger.info(f"✅ incident_section: {base_update['incident_section']}")
+        
         return Command(update=base_update)
+
 
     def _request_missing_fields_intelligently(self, state: EroskiState, current_data: Dict, missing_fields: List[str], base_update: Dict) -> Command:
         """Pedir solo los campos que faltan de forma inteligente"""
@@ -513,6 +535,9 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
         collected_data = base_update["auth_data_collected"]
         
         # Mensaje de confirmación final
+
+
+        
         confirmation_message = f"""✅ **¡Información recopilada correctamente!**
 
 👤 **Empleado:** {collected_data.get('name')}
@@ -941,6 +966,10 @@ INSTRUCCIONES PARA TU ANÁLISIS:
    - Personaliza usando el nombre si lo sabes
 
 EJEMPLOS DE RESPUESTAS:
+
+Usuario: "soy Javier Guerra, de Eroski Bilbao, javier.guerra@devol.es, y tengo un problema con la balanza"
+→ Extraer: name="Javier Guerra", email="javier.guerra@devol.es", store_name="Eroski Bilbao", section="balanza"
+→ email_detected=true, next_action="search_db"
 
 Usuario: "Hola, soy Juan Pérez, mi email es juan@eroski.es, trabajo en Eroski Bilbao Centro"
 → Extraer: name="Juan Pérez", email="juan@eroski.es", store_name="Eroski Bilbao Centro"

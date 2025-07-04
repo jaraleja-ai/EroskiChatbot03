@@ -242,24 +242,62 @@ class EroskiFinalWorkflow(BaseWorkflow):
         self.logger.debug("📝 Autenticación en proceso, necesita más input")
         return "need_input"
 
+
     def route_authenticate_llm_driven_with_validation(self, state: EroskiState) -> Literal["continue", "need_input", "escalate", "cancelled"]:
-        """
-        Router con validación previa del estado.
-        Este es el router principal que se usa en el workflow.
-        """
+        """Router con validación previa del estado - VERSIÓN CORREGIDA"""
         
-        # 1. Validar estado antes de routing
-        if not self.validate_auth_state_before_routing(state):
-            self.logger.error("❌ Estado inválido, escalando")
+        self.logger.info("🔍 === ROUTER AUTHENTICATE DEBUG ===")
+        self.logger.info(f"🎯 authentication_stage: {state.get('authentication_stage')}")
+        self.logger.info(f"🎯 datos_usuario_completos: {state.get('datos_usuario_completos')}")
+        self.logger.info(f"🎯 ready_for_classification: {state.get('ready_for_classification')}")
+        self.logger.info(f"🎯 awaiting_user_input: {state.get('awaiting_user_input')}")
+        self.logger.info(f"🎯 employee_name: {state.get('employee_name')}")
+        self.logger.info(f"🎯 incident_store_name: {state.get('incident_store_name')}")
+        self.logger.info(f"🎯 incident_section: {state.get('incident_section')}")
+        
+        # 1. Verificar cancelación confirmada
+        if (state.get("user_cancelled") or 
+            state.get("conversation_cancelled") or
+            state.get("awaiting_cancellation_confirmation")):
+            self.logger.info("🚫 Usuario canceló la conversación")
+            return "cancelled"
+        
+        # 2. ✅ ORDEN CORRECTO: Verificar autenticación ANTES que awaiting_user_input
+        authentication_complete = (
+            state.get("authentication_stage") == "completed" and
+            state.get("datos_usuario_completos") and
+            state.get("ready_for_classification") and
+            state.get("employee_name") and
+            state.get("incident_store_name") and
+            state.get("incident_section")
+        )
+        
+        if authentication_complete:
+            self.logger.info("✅ Autenticación completada, continuando a clasificación")
+            return "continue"
+        
+        # 3. Verificar si necesita input del usuario (DESPUÉS de verificar completado)
+        if state.get("awaiting_user_input"):
+            self.logger.debug("⏳ Esperando input del usuario")
+            return "need_input"
+        
+        # 4. Verificar escalación por errores
+        escalation_conditions = [
+            state.get("escalation_needed"),
+            state.get("attempts", 0) >= 5,
+            state.get("fallback_mode") and state.get("attempts", 0) >= 3,
+            state.get("error_count", 0) >= 3
+        ]
+        
+        if any(escalation_conditions):
+            escalation_reason = "Límite de intentos o errores críticos en autenticación"
+            self.logger.warning(f"🔼 Escalando: {escalation_reason}")
             return "escalate"
         
-        # 2. Logging de debugging si está habilitado
-        if self.logger.isEnabledFor(logging.DEBUG):
-            debug_info = self.debug_authentication_state(state)
-            self.logger.debug(f"🔍 Debug autenticación: {debug_info}")
-        
-        # 3. Ejecutar routing principal
-        return self.route_authenticate_llm_driven(state)
+        # 5. Por defecto, necesita más input del usuario
+        self.logger.debug("📝 Autenticación en proceso, necesita más input")
+        return "need_input"
+
 
     def route_search_solution(self, state: EroskiState) -> Literal["solution_found", "escalate", "need_clarification"]:
         """

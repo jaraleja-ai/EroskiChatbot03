@@ -1,0 +1,4 @@
+1. LISTADO MAESTRO DE TIENDAS 
+    Listado de tiendas para verificar la que mete el usuario.
+    El usuario introducirá una tienda, y el llm buscará la tienda que más se parece y le pedirá al usuario que la confirme
+    si el usuario no la confirma, el llm volverá a pedirle la tienda.
