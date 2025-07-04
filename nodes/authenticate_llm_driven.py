@@ -386,7 +386,7 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
         self.logger.info(f"✅ incident_section: {complete_update['incident_section']}")
         self.logger.info("✅ === FIN CONFIGURACIÓN ESTADO ===")
         
-        return Command(update=complete_update)
+        return Command(update=complete_update, goto="classify")
 
 
     # =========================================================================
@@ -617,7 +617,7 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
             "messages": state.get("messages", []) + [AIMessage(content=success_message)]
         })
         
-        return Command(update=base_update)
+        return Command(update=base_update, goto = 'classify')
     def _complete_authentication_with_manual_data(self, state: EroskiState, current_data: Dict, base_update: Dict) -> Command:
         """Completar autenticación con datos manuales - VERSIÓN CORREGIDA"""
         
@@ -662,7 +662,7 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
         self.logger.info(f"✅ incident_store_name: {base_update['incident_store_name']}")
         self.logger.info(f"✅ incident_section: {base_update['incident_section']}")
         
-        return Command(update=base_update)
+        return Command(update=base_update, goto="classify" )
 
 
     def _request_missing_fields_intelligently(self, state: EroskiState, current_data: Dict, missing_fields: List[str], base_update: Dict) -> Command:
@@ -1029,7 +1029,9 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
         return Command(update={
             "current_node": "authenticate",
             "last_activity": datetime.now()
-        })
+            },
+            goto="classify"
+        )
     
     # =========================================================================
     # BÚSQUEDA EN BASE DE DATOS
