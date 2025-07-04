@@ -20,10 +20,12 @@ PRINCIPIOS:
 
 from typing import Dict, Any, Optional, List
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+#from langgraph.graph import StateSnapshot
 from datetime import datetime
 import logging
 import uuid
 import traceback
+import json
 
 from workflows.eroski_main_workflow import EroskiFinalWorkflow
 from models.eroski_state import EroskiState, create_initial_eroski_state
@@ -74,10 +76,19 @@ class EroskiChatInterface:
                 "configurable": {"thread_id": session_id},
                 "recursion_limit": 20
             }
-            
+            # Recuperar estado anterior desde el checkpointer
+            previous_state = await self.graph.aget_state({"configurable": {"thread_id": session_id}})
+            print(previous_state.values)
+            previous_state_data = previous_state.values if previous_state else {}
+            previous_messages = previous_state_data.get("messages", [])
+
+            # Agregar el nuevo mensaje del usuario
+            all_messages = previous_messages + [HumanMessage(content=user_message)]
+
             # Preparar input para el grafo
             input_data = {
-                "messages": [HumanMessage(content=user_message)],
+                 **previous_state_data,
+                "messages": all_messages,
                 "session_id": session_id,
                 "last_activity": datetime.now()
             }
@@ -89,7 +100,7 @@ class EroskiChatInterface:
             # Ejecutar grafo
             self.logger.debug("🔄 Ejecutando workflow...")
             result = await self.graph.ainvoke(input_data, config)
-            self.logger.info(f"🌄JGL eroski chat interface{result}")
+            #self.logger.info(f"🌄JGL Estado recibido: {json.dumps(result, indent=2, default=str)}")
             # Procesar resultado
             response_data = self._process_workflow_result(result, session_id)
             

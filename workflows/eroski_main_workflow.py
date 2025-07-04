@@ -56,8 +56,6 @@ class EroskiFinalWorkflow(BaseWorkflow):
         - AuthenticateNodeEnhanced: Recopila toda la información necesaria
         - ClassifyQueryNodeEnhanced: Análisis LLM de incidencias
         """
-   
-
 
     def build_graph(self) -> StateGraph:
         """
@@ -171,7 +169,6 @@ class EroskiFinalWorkflow(BaseWorkflow):
         # ESCALATE y FINALIZE terminan en END
         graph.add_edge("escalate", END)
         graph.add_edge("finalize", END)
-        
         self.logger.info("✅ Grafo construido exitosamente con nodo LLM-driven")
         
         return graph
@@ -264,6 +261,37 @@ class EroskiFinalWorkflow(BaseWorkflow):
         # 3. Ejecutar routing principal
         return self.route_authenticate_llm_driven(state)
 
+    def route_search_solution(self, state: EroskiState) -> Literal["solution_found", "escalate", "need_clarification"]:
+        """
+        Router para el nodo de búsqueda de soluciones.
+        """
+        
+        # Verificar si se encontró solución
+        if state.get("solution_found"):
+            return "solution_found"
+        
+        # Verificar si necesita más información
+        if state.get("need_more_info"):
+            return "need_clarification"
+        
+        # Si no hay solución, escalar
+        return "escalate"
+
+    def route_verify(self, state: EroskiState) -> Literal["resolved", "not_resolved", "need_feedback"]:
+        """
+        Router para el nodo de verificación.
+        """
+        
+        # Verificar si el usuario confirmó resolución
+        if state.get("problem_resolved"):
+            return "resolved"
+        
+        # Verificar si el usuario confirmó que no se resolvió
+        if state.get("problem_not_resolved"):
+            return "not_resolved"
+        
+        # Si no hay feedback, solicitar
+        return "need_feedback"
 
     def _log_authentication_metrics(self, state: EroskiState):
         """Registrar métricas del proceso de autenticación"""
@@ -377,7 +405,7 @@ class EroskiFinalWorkflow(BaseWorkflow):
     # ROUTER MEJORADO CON VALIDACIÓN
     # =============================================================================
 
-    def route_classify_enhanced(self, state: EroskiState) -> Literal["collect_details", "need_clarification", "cancelled", "escalate"]:
+    def route_classify(self, state: EroskiState) -> Literal["collect_details", "need_clarification", "cancelled", "escalate"]:
         """
         Routing mejorado para nodo de clasificación.
         """

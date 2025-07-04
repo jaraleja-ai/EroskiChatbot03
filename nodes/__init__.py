@@ -6,7 +6,9 @@ from .base_node import BaseNode
 
 # ========== IMPORTS CON MANEJO DE ERRORES ==========
 try:
-    from .authenticate_llm_driven import authenticate_employee_node
+    # CORRECCIÓN: Era authenticate_llm__driven (doble guión bajo)
+    # AHORA: authenticate_llm_driven (guión bajo simple)
+    from .authenticate_llm_driven import llm_driven_authenticate_node
     AUTHENTICATE_AVAILABLE = True
     print("✅ authenticate disponible")
 except ImportError as e:
@@ -62,7 +64,7 @@ except ImportError:
 __all__ = ["BaseNode"]
 
 if AUTHENTICATE_AVAILABLE:
-    __all__.extend(["authenticate_employee_node"])
+    __all__.extend(["llm_driven_authenticate_node"])  # CORRECCIÓN: nombre correcto
 
 if CLASSIFY_AVAILABLE:
     __all__.extend(["classify_query_node"])

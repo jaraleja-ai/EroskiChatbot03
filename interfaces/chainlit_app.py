@@ -19,6 +19,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 import logging
 import uuid
+from langchain_core.messages import AIMessage
 
 # ========== IMPORTS SIMPLIFICADOS ==========
 
@@ -123,7 +124,7 @@ async def start():
         # Mensaje de bienvenida
         welcome_message = """# ¡Bienvenido al Asistente de Incidencias de Eroski! 🤖
 
-Soy tu asistente virtual especializado en ayudarte con problemas técnicos y consultas operativas.
+Soy tu asistente virtual especializado en ayudarte a resolver incidencias.
 
 ## ¿Cómo puedo ayudarte?
 
@@ -183,88 +184,63 @@ Por favor, proporciona:
 async def main(message: cl.Message):
     """Procesar mensaje del usuario - HANDLER PRINCIPAL"""
     try:
-        # Obtener información de la sesión
         session_id = cl.user_session.get("session_id")
         if not session_id:
             session_id = f"fallback_{uuid.uuid4().hex[:8]}"
             cl.user_session.set("session_id", session_id)
             logger.warning(f"Sesión no encontrada, creando fallback: {session_id}")
-        
+
         user_message = message.content.strip()
         if not user_message:
-            await cl.Message(
-                content="Por favor, escribe un mensaje para que pueda ayudarte.",
-                author="Sistema"
-            ).send()
+            await cl.Message("Por favor, escribe un mensaje para que pueda ayudarte.", author="Sistema").send()
             return
-        
-        logger.info(f"📨 Mensaje recibido en sesión {session_id}: {user_message[:100]}...")
-        
-        # Mostrar indicador de procesamiento
+
+        logger.info(f"📨 Mensaje recibido en sesión {session_id}: {user_message[:100]}")
+
+        # Mensaje de espera
         processing_msg = cl.Message(content="🤔 Analizando tu mensaje...", author="Sistema")
         await processing_msg.send()
-        
+
         try:
-            # Procesar mensaje según el modo
             if ADVANCED_MODE:
-                # Usar interfaz avanzada
+                # Ejecutar el grafo con EroskiChatInterface
                 result = await message_processor.process_message(
                     user_message=user_message,
                     session_id=session_id,
-                    user_context={
-                        "platform": "chainlit",
-                        "user_agent": "web",
-                        "timestamp": datetime.now()
-                    }
+                    user_context={"platform": "chainlit", "timestamp": datetime.now()}
                 )
-                
-                # Manejar resultado estructurado
-                if isinstance(result, dict):
-                    if result.get("success"):
-                        response = result.get("response", "Respuesta procesada correctamente.")
-                        author = "Asistente Eroski"
-                    else:
-                        response = result.get("response", "Error procesando mensaje.")
-                        author = "Sistema ⚠️"
-                else:
-                    response = str(result)
-                    author = "Asistente Eroski"
+
+                # Guardar el resultado en la sesión
+                cl.user_session.set("state", result)
+
+                # Obtener respuesta
+                response = result.get("response", "Sin respuesta del asistente.")
+                author = result.get("status", "") == "error" and "Sistema ⚠️" or "Asistente Eroski"
             else:
-                # Usar modo fallback
                 response = await message_processor.process_message(user_message, session_id)
                 author = "Asistente Eroski"
-            
-            # Remover indicador y enviar respuesta
+
             await processing_msg.remove()
-            
-            await cl.Message(
-                content=response,
-                author=author
-            ).send()
-            
+            await cl.Message(content=response, author=author).send()
             logger.info("✅ Mensaje procesado exitosamente")
-            
+
         except Exception as proc_error:
             logger.error(f"❌ Error procesando mensaje: {proc_error}")
-            
-            # Remover indicador
-            try:
-                await processing_msg.remove()
-            except:
-                pass
-            
-            # Enviar mensaje de error
+            await processing_msg.remove()
             await cl.Message(
-                content=f"❌ Error procesando tu mensaje: {str(proc_error)}\n\nPor favor, intenta de nuevo.",
+                content=f"❌ Error procesando tu mensaje: {str(proc_error)}",
                 author="Sistema"
             ).send()
-        
+
     except Exception as e:
         logger.error(f"❌ Error crítico en handler: {e}")
         await cl.Message(
             content=f"❌ Error crítico: {str(e)}",
             author="Sistema"
         ).send()
+
+
+
 
 @cl.on_chat_end
 async def end():

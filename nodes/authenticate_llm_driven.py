@@ -106,9 +106,17 @@ class LLMDrivenAuthenticateNode(BaseNode):
         Returns:
             Command con la siguiente acción
         """
+        
+        self.logger.info(f"🧪 Estado inicial - auth_conversation_started: {state.get('auth_conversation_started')}")
 
         self.logger.info("🏅"*50)
         self.logger.info(f"🌄JGL entrando en {self.__class__.__name__}")
+        collected_data = state.get("auth_data_collected", {})
+        filled_fields = [k for k in self.required_fields if collected_data.get(k)]
+        missing_fields = [k for k in self.required_fields if not collected_data.get(k)]
+        self.logger.info(f"🟢 Campos rellenados: {filled_fields}")
+        self.logger.info(f"🔴 Campos faltantes: {missing_fields}")
+
         try:
             self.logger.info("🤖 Iniciando autenticación LLM-driven")
             
@@ -152,10 +160,10 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
         return Command(update={
             "current_node": "authenticate",
             "messages": state.get("messages", []) + [AIMessage(content=welcome_message)],
-            "awaiting_user_input": True,
-            "attempts": 1,
-            "auth_data_collected": {},
+            "attempts": state.get("attempts", 0) + 1,
             "auth_conversation_started": True,
+            "awaiting_user_input": True,
+            "auth_data_collected": state.get("auth_data_collected", {}),
             "last_activity": datetime.now()
         })
     
@@ -175,27 +183,59 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
     
     async def _get_llm_decision(self, state: EroskiState) -> ConversationDecision:
         """Obtener decisión inteligente del LLM"""
-        
+
         # Preparar contexto completo
         context = self._build_conversation_context(state)
-        
+
         # Formatear prompt
         formatted_prompt = self.conversation_prompt.format(**context)
-        
+
         # Invocar LLM
         self.logger.debug("🤖 Solicitando decisión a LLM...")
         response = await self.llm.ainvoke(formatted_prompt)
-        
-        # Parsear respuesta
+
         try:
-            decision = self.parser.parse(response.content)
+            raw_response = response.content
+            self.logger.debug(f"📥 Respuesta cruda del LLM: {raw_response}")
+            self.logger.debug(f"🧪 Tipo real de raw_response: {type(raw_response)}")
+
+            # 🔧 Si viene como string, limpiar y parsear
+            if isinstance(raw_response, str):
+                raw_response = raw_response.strip()
+                if raw_response.startswith("```json"):
+                    raw_response = raw_response.replace("```json", "").strip()
+                if raw_response.startswith("```"):
+                    raw_response = raw_response.replace("```", "").strip()
+                if raw_response.endswith("```"):
+                    raw_response = raw_response[:-3].strip()
+
+                self.logger.debug(f"📥 JSON limpio para parser: ->{raw_response}<-")
+
+                # Parsear con JsonOutputParser
+                parsed = self.parser.parse(raw_response)
+
+                # Verificar si es dict (por fallback interno del parser)
+                if isinstance(parsed, dict):
+                    decision = ConversationDecision(**parsed)
+                else:
+                    decision = parsed
+
+            # ✅ Si ya viene como dict, construir el modelo directamente
+            elif isinstance(raw_response, dict):
+                self.logger.debug("📥 Dict detectado, creando modelo directamente")
+                decision = ConversationDecision(**raw_response)
+
+            else:
+                raise ValueError("⚠️ Respuesta del LLM en formato inesperado")
+
+            self.logger.info(f"🧠 Datos extraídos por el LLM: {decision.extracted_data}")
             self.logger.info(f"🎯 LLM decidió: {decision.next_action}")
             return decision
-            
+
         except Exception as parse_error:
             self.logger.warning(f"⚠️ Error parseando LLM, usando fallback: {parse_error}")
             return self._create_fallback_decision(state)
-    
+
     async def _execute_llm_decision(self, state: EroskiState, decision: ConversationDecision) -> Command:
         """Ejecutar la decisión tomada por el LLM"""
         
@@ -358,7 +398,105 @@ Puedes darme **toda la información de una vez** o por partes, como prefieras. �
     # =========================================================================
     # FUNCIONES AUXILIARES
     # =========================================================================
-    
+
+    def _extract_user_data(message: str) -> Dict[str, Any]:
+        """Extraer datos del usuario del mensaje (versión simplificada)"""
+        import re
+        
+        data = {}
+        message_lower = message.lower()
+        
+        # Buscar email
+        email_match = re.search(r'([a-zA-Z0-9._%+-]+@eroski\.es)', message)
+        if email_match:
+            data["email"] = email_match.group(1)
+        
+        # Buscar nombre (patrón simple)
+        if "soy" in message_lower:
+            name_match = re.search(r'soy\s+([a-záéíóúñ\s]+)', message_lower)
+            if name_match:
+                data["name"] = name_match.group(1).strip().title()
+        
+        # Buscar tienda
+        if "eroski" in message_lower and ("centro" in message_lower or "tienda" in message_lower or "madrid" in message_lower):
+            # Buscar patrones como "Eroski Madrid Centro"
+            store_match = re.search(r'eroski\s+([a-záéíóúñ\s]+)', message_lower)
+            if store_match:
+                data["store_name"] = f"Eroski {store_match.group(1).strip().title()}"
+        
+        # Buscar sección
+        sections = ["carnicería", "pescadería", "frutería", "panadería", "charcutería", "caja", "reposición", "seguridad", "administración", "it", "informática"]
+        for section in sections:
+            if section in message_lower:
+                data["section"] = section.capitalize()
+                break
+        
+        return data
+
+    def _check_missing_fields(auth_data: Dict[str, Any]) -> list:
+        """Verificar qué campos faltan"""
+        required_fields = ["email", "name", "store_name", "section"]
+        missing = []
+        
+        for field in required_fields:
+            if not auth_data.get(field):
+                missing.append(field)
+        
+        return missing
+
+    def _generate_data_request_message(missing_fields: list, current_data: Dict[str, Any]) -> str:
+        """Generar mensaje solicitando datos faltantes"""
+        
+        # Confirmar datos ya recibidos
+        confirmation_parts = []
+        if current_data.get("name"):
+            confirmation_parts.append(f"👤 Nombre: {current_data['name']}")
+        if current_data.get("email"):
+            confirmation_parts.append(f"📧 Email: {current_data['email']}")
+        if current_data.get("store_name"):
+            confirmation_parts.append(f"🏪 Tienda: {current_data['store_name']}")
+        if current_data.get("section"):
+            confirmation_parts.append(f"🏢 Sección: {current_data['section']}")
+        
+        # Solicitar datos faltantes
+        request_parts = []
+        if "name" in missing_fields:
+            request_parts.append("👤 Tu nombre completo")
+        if "email" in missing_fields:
+            request_parts.append("📧 Tu email corporativo (@eroski.es)")
+        if "store_name" in missing_fields:
+            request_parts.append("🏪 Tu tienda")
+        if "section" in missing_fields:
+            request_parts.append("🏢 Tu sección/departamento")
+        
+        message = "Perfecto, he registrado:\n\n"
+        if confirmation_parts:
+            message += "\n".join(confirmation_parts)
+        
+        message += "\n\nPara completar tu identificación, necesito:\n\n"
+        message += "\n".join(request_parts)
+        
+        return message
+
+    def _simulate_employee_lookup(auth_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Simular búsqueda en base de datos (reemplazar con función real)"""
+        
+        # Datos simulados basados en la información proporcionada
+        return {
+            "id": "EMP001",
+            "name": auth_data.get("name", "Usuario Temporal"),
+            "email": auth_data.get("email", "temp@eroski.es"),
+            "store_id": "STORE001",
+            "store_name": auth_data.get("store_name", "Eroski Temporal"),
+            "section": auth_data.get("section", "General"),
+            "department": auth_data.get("section", "General"),
+            "level": 2
+        }
+
+    def authenticate_employee_node():
+        """Función wrapper para compatibilidad con importaciones anteriores"""
+        return llm_driven_authenticate_node
+
     def _build_conversation_context(self, state: EroskiState) -> Dict[str, str]:
         """Construir contexto completo para el LLM"""
         
@@ -612,8 +750,7 @@ Usuario: "trabajo en caja en Eroski"
 → next_action="collect_data"
 → mensaje="Entiendo que trabajas en caja. ¿Podrías decirme tu nombre y en qué Eroski específico?"
 
-RESPONDE ÚNICAMENTE CON JSON VÁLIDO:
-
+RESPONDE ÚNICAMENTE CON JSON VÁLIDO incluyendo TODOS los campos definidos (aunque sean false):
 {{
     "is_complete": false,
     "should_search_database": false,
@@ -623,7 +760,10 @@ RESPONDE ÚNICAMENTE CON JSON VÁLIDO:
     "message_to_user": "Mensaje natural aquí",
     "missing_fields": [],
     "confidence_level": 0.8
-}}""",
+}}
+⚠️ IMPORTANTE: No uses formato Markdown. No pongas ```json ni ningún tipo de bloque de código. Solo responde con JSON puro, sin símbolos adicionales.
+
+""",
             input_variables=["user_message", "collected_data", "conversation_history", "missing_fields", "required_fields_desc", "attempt_number"]
         )
 
@@ -639,7 +779,16 @@ async def llm_driven_authenticate_node(state: EroskiState) -> Command:
     Returns:
         Instancia configurada del nodo
     """
-    
     node = LLMDrivenAuthenticateNode()
-    return await node.execute(state)
+    command = await node.execute(state)
+    state.update(command.update)
+    return state
+    #command = await node.execute(state)
+    #return {**state, **command.update}
 
+    #node = LLMDrivenAuthenticateNode()
+    #command = await node.execute(state)
+    #state.update(command.update)
+    #return await node.execute(state)
+
+__all__ = ["llm_driven_authenticate_node", "authenticate_employee_node"]

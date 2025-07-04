@@ -1,496 +1,304 @@
-# =============================================================================
-# INTEGRACIÓN DEL NODO LLM-DRIVEN EN EL WORKFLOW
-# =============================================================================
-
-# 1. ACTUALIZAR workflow/eroski_main_workflow.py
+# =====================================================
+# nodes/authenticate_llm_driven.py - Nodo de Autenticación LLM-Driven SIMPLIFICADO
+# =====================================================
 """
-Reemplazar la importación del nodo de autenticación:
-
-ANTES:
-from nodes.authenticate import AuthenticateEmployeeNodeComplete
-
-DESPUÉS:
-from nodes.authenticate_llm_driven import LLMDrivenAuthenticateNode
-
-Y en la función _add_nodes:
-authenticate_node = LLMDrivenAuthenticateNode()
-graph.add_node("authenticate", authenticate_node.execute)
+Nodo de autenticación simplificado que funciona como wrapper.
+Esta versión garantiza compatibilidad mientras se desarrolla la versión completa.
 """
 
-# =============================================================================
-# 2. CONFIGURACIÓN DE RUTAS EN EL WORKFLOW
-# =============================================================================
-
-def route_authenticate_llm_driven(state: EroskiState) -> str:
-    """
-    Router mejorado para el nodo LLM-driven.
-    
-    Args:
-        state: Estado actual
-        
-    Returns:
-        Siguiente nodo a ejecutar
-    """
-    
-    # Verificar si necesita input del usuario
-    if state.get("awaiting_user_input"):
-        return "need_input"  # Termina en END para esperar respuesta
-    
-    # Verificar cancelación confirmada
-    if state.get("user_cancelled"):
-        return "cancelled"  # Termina en END
-    
-    # Verificar escalación por errores
-    if state.get("escalation_needed"):
-        return "escalate"
-    
-    # Verificar si la autenticación está completa
-    if (state.get("authentication_stage") == "completed" and 
-        state.get("datos_usuario_completos")):
-        return "continue"  # Ir a classify
-    
-    # Por defecto, continuar en el mismo nodo
-    return "need_input"
-
-
-# =============================================================================
-# 3. PARSER JSON ROBUSTO PARA MANEJO DE ERRORES
-# =============================================================================
-
-import json
-import re
-from typing import Any, Dict
-
-class RobustLLMParser:
-    """Parser robusto para respuestas LLM con múltiples estrategias de fallback"""
-    
-    @staticmethod
-    def parse_llm_response(content: str) -> Dict[str, Any]:
-        """
-        Parsear respuesta LLM con estrategias de fallback.
-        
-        Args:
-            content: Contenido de la respuesta LLM
-            
-        Returns:
-            Diccionario parseado
-        """
-        
-        # Estrategia 1: JSON directo
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            pass
-        
-        # Estrategia 2: JSON en bloques markdown
-        json_patterns = [
-            r'```json\s*\n(.*?)\n```',  # ```json ... ```
-            r'```\s*\n(.*?)\n```',     # ``` ... ```
-        ]
-        
-        for pattern in json_patterns:
-            match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
-            if match:
-                try:
-                    return json.loads(match.group(1).strip())
-                except json.JSONDecodeError:
-                    continue
-        
-        # Estrategia 3: Buscar JSON en cualquier parte
-        try:
-            start = content.find('{')
-            end = content.rfind('}')
-            if start != -1 and end != -1 and end > start:
-                json_str = content[start:end+1]
-                return json.loads(json_str)
-        except json.JSONDecodeError:
-            pass
-        
-        # Estrategia 4: Crear respuesta de fallback
-        return RobustLLMParser._create_emergency_response(content)
-    
-    @staticmethod
-    def _create_emergency_response(content: str) -> Dict[str, Any]:
-        """Crear respuesta de emergencia cuando todo falla"""
-        
-        content_lower = content.lower()
-        
-        # Detectar intención de cancelar
-        cancel_keywords = ["cancelar", "salir", "no quiero", "adiós", "olvídalo"]
-        wants_to_cancel = any(keyword in content_lower for keyword in cancel_keywords)
-        
-        # Detectar email
-        email_match = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', content)
-        
-        # Construir respuesta de emergencia
-        return {
-            "is_complete": False,
-            "should_search_database": bool(email_match),
-            "wants_to_cancel": wants_to_cancel,
-            "extracted_data": {"email": email_match.group()} if email_match else {},
-            "next_action": "cancel" if wants_to_cancel else "collect_data",
-            "message_to_user": "Disculpa, ¿podrías repetir la información?",
-            "missing_fields": ["información"],
-            "confidence_level": 0.3
-        }
-
-
-# =============================================================================
-# 4. INTEGRACIÓN EN EL PARSER DEL NODO
-# =============================================================================
-
-# Actualizar el método _get_llm_decision en LLMDrivenAuthenticateNode:
-
-async def _get_llm_decision_improved(self, state: EroskiState) -> ConversationDecision:
-    """Versión mejorada con parser robusto"""
-    
-    try:
-        # Preparar contexto
-        context = self._build_conversation_context(state)
-        formatted_prompt = self.conversation_prompt.format(**context)
-        
-        # Invocar LLM
-        response = await self.llm.ainvoke(formatted_prompt)
-        
-        # Parser robusto
-        parsed_data = RobustLLMParser.parse_llm_response(response.content)
-        
-        # Convertir a ConversationDecision
-        decision = ConversationDecision(**parsed_data)
-        
-        self.logger.info(f"🎯 LLM decidió: {decision.next_action} (confianza: {decision.confidence_level})")
-        return decision
-        
-    except Exception as e:
-        self.logger.warning(f"⚠️ Error en decisión LLM: {e}")
-        return self._create_fallback_decision(state)
-
-
-# =============================================================================
-# 5. MÉTRICAS Y MONITOREO
-# =============================================================================
-
-class AuthenticationMetrics:
-    """Clase para recopilar métricas del proceso de autenticación"""
-    
-    @staticmethod
-    def log_authentication_metrics(state: EroskiState, node_logger):
-        """Registrar métricas del proceso de autenticación"""
-        
-        metrics = {
-            "total_attempts": state.get("attempts", 0),
-            "conversation_efficiency": AuthenticationMetrics._calculate_efficiency(state),
-            "data_collection_method": "database" if state.get("found_in_database") else "manual",
-            "completion_time": AuthenticationMetrics._calculate_completion_time(state),
-            "fallback_used": state.get("fallback_mode", False),
-            "llm_decision_count": state.get("llm_decisions_made", 0)
-        }
-        
-        node_logger.info(f"📊 Métricas de autenticación: {metrics}")
-        return metrics
-    
-    @staticmethod
-    def _calculate_efficiency(state: EroskiState) -> str:
-        """Calcular eficiencia del proceso"""
-        
-        attempts = state.get("attempts", 0)
-        if attempts == 1:
-            return "excellent"  # Todo en un intercambio
-        elif attempts <= 2:
-            return "good"      # 2 intercambios
-        elif attempts <= 3:
-            return "fair"      # 3 intercambios
-        else:
-            return "poor"      # Más de 3 intercambios
-    
-    @staticmethod
-    def _calculate_completion_time(state: EroskiState) -> int:
-        """Calcular tiempo de completado en minutos"""
-        
-        start_time = state.get("conversation_started_at")
-        end_time = state.get("last_activity")
-        
-        if start_time and end_time:
-            delta = end_time - start_time
-            return int(delta.total_seconds() / 60)
-        
-        return 0
-
-
-# =============================================================================
-# 6. VALIDACIONES Y CHECKS DE CALIDAD
-# =============================================================================
-
-class DataQualityValidator:
-    """Validador de calidad de datos recopilados"""
-    
-    @staticmethod
-    def validate_collected_data(collected_data: Dict) -> Dict[str, Any]:
-        """
-        Validar calidad de los datos recopilados.
-        
-        Args:
-            collected_data: Datos recopilados
-            
-        Returns:
-            Reporte de validación
-        """
-        
-        validation_report = {
-            "is_valid": True,
-            "issues": [],
-            "recommendations": [],
-            "confidence_score": 1.0
-        }
-        
-        # Validar nombre
-        name = collected_data.get("name", "")
-        if not DataQualityValidator._is_valid_name(name):
-            validation_report["issues"].append("Nombre no parece válido")
-            validation_report["confidence_score"] -= 0.2
-        
-        # Validar email
-        email = collected_data.get("email", "")
-        if email and not DataQualityValidator._is_valid_email(email):
-            validation_report["issues"].append("Formato de email cuestionable")
-            validation_report["confidence_score"] -= 0.1
-        
-        # Validar tienda
-        store = collected_data.get("store_name", "")
-        if not DataQualityValidator._is_valid_store(store):
-            validation_report["issues"].append("Nombre de tienda poco específico")
-            validation_report["recommendations"].append("Solicitar ubicación más específica")
-            validation_report["confidence_score"] -= 0.1
-        
-        # Validar sección
-        section = collected_data.get("section", "")
-        if not DataQualityValidator._is_valid_section(section):
-            validation_report["issues"].append("Sección no reconocida")
-            validation_report["recommendations"].append("Clarificar sección específica")
-            validation_report["confidence_score"] -= 0.1
-        
-        # Determinar validez general
-        validation_report["is_valid"] = validation_report["confidence_score"] >= 0.7
-        
-        return validation_report
-    
-    @staticmethod
-    def _is_valid_name(name: str) -> bool:
-        """Validar que el nombre sea realista"""
-        if not name or len(name) < 3:
-            return False
-        
-        # Debe tener al menos nombre y apellido
-        parts = name.strip().split()
-        return len(parts) >= 2 and all(part.isalpha() or part.replace('-', '').isalpha() for part in parts)
-    
-    @staticmethod
-    def _is_valid_email(email: str) -> bool:
-        """Validar formato básico de email"""
-        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        return bool(re.match(pattern, email))
-    
-    @staticmethod
-    def _is_valid_store(store: str) -> bool:
-        """Validar que el nombre de tienda sea específico"""
-        if not store or len(store) < 5:
-            return False
-        
-        # Debe contener "eroski" y alguna ubicación
-        store_lower = store.lower()
-        return "eroski" in store_lower and any(
-            keyword in store_lower for keyword in [
-                "madrid", "barcelona", "bilbao", "sevilla", "valencia", 
-                "centro", "norte", "sur", "este", "oeste", "mall", "cc"
-            ]
-        )
-    
-    @staticmethod
-    def _is_valid_section(section: str) -> bool:
-        """Validar que la sección sea reconocida"""
-        if not section:
-            return False
-        
-        valid_sections = [
-            "carnicería", "pescadería", "panadería", "frutería",
-            "caja", "cajas", "tpv", "cobro",
-            "almacén", "recepción", "stock",
-            "oficina", "administración", "gerencia",
-            "sala", "descanso", "vestuario",
-            "limpieza", "mantenimiento", "seguridad"
-        ]
-        
-        section_lower = section.lower()
-        return any(valid in section_lower for valid in valid_sections)
-
-
-# =============================================================================
-# 7. EJEMPLO DE USO E INTEGRACIÓN COMPLETA
-# =============================================================================
-
-# En workflows/eroski_main_workflow.py:
-
-"""
-def _add_nodes(self, graph):
-    try:
-        # Importar nodo LLM-driven
-        from nodes.authenticate_llm_driven import LLMDrivenAuthenticateNode
-        
-        # Crear instancia del nodo
-        auth_node = LLMDrivenAuthenticateNode()
-        
-        # Añadir al grafo
-        graph.add_node("authenticate", auth_node.execute)
-        
-        # Configurar router
-        graph.add_conditional_edges(
-            "authenticate",
-            route_authenticate_llm_driven,  # Usar router mejorado
-            {
-                "continue": "classify",
-                "need_input": END,
-                "escalate": "escalate",
-                "cancelled": END
-            }
-        )
-        
-        self.logger.info("✅ Nodo LLM-driven integrado correctamente")
-        
-    except Exception as e:
-        self.logger.error(f"❌ Error integrando nodo LLM: {e}")
-        raise
-"""
-
-# =============================================================================
-# 8. CONFIGURACIÓN DE LOGGING ESPECIALIZADO
-# =============================================================================
-
+from typing import Dict, Any, Optional
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.types import Command
+from datetime import datetime
 import logging
 
-def setup_llm_driven_logging():
-    """Configurar logging especializado para el nodo LLM-driven"""
-    
-    # Logger específico para conversaciones LLM
-    llm_logger = logging.getLogger("LLMDrivenAuth")
-    llm_logger.setLevel(logging.INFO)
-    
-    # Formato especializado
-    formatter = logging.Formatter(
-        '%(asctime)s | LLM-AUTH | %(levelname)s | %(message)s'
-    )
-    
-    # Handler para archivo específico
-    handler = logging.FileHandler('logs/llm_authentication.log')
-    handler.setFormatter(formatter)
-    llm_logger.addHandler(handler)
-    
-    return llm_logger
+from models.eroski_state import EroskiState
+
 
 # =============================================================================
-# 9. TESTS UNITARIOS PARA EL NODO LLM-DRIVEN
+# LOGGER
 # =============================================================================
 
-"""
-# En tests/test_llm_authenticate_node.py
+logger = logging.getLogger("LLMDrivenAuth")
 
-import pytest
-from nodes.authenticate_llm_driven import LLMDrivenAuthenticateNode, ConversationDecision
 
-@pytest.mark.asyncio
-async def test_complete_data_in_one_message():
-    '''Test: Usuario da toda la información en un mensaje'''
-    
-    node = LLMDrivenAuthenticateNode()
-    
-    state = {
-        "messages": [
-            HumanMessage(content="Hola, soy Juan Pérez, mi email es juan@eroski.es, trabajo en Eroski Madrid Centro en carnicería")
-        ],
-        "auth_data_collected": {}
-    }
-    
-    # Mock LLM response
-    mock_decision = ConversationDecision(
-        is_complete=True,
-        extracted_data={
-            "name": "Juan Pérez",
-            "email": "juan@eroski.es",
-            "store_name": "Eroski Madrid Centro",
-            "section": "carnicería"
-        },
-        next_action="complete",
-        message_to_user="¡Perfecto Juan! Ya tengo toda tu información..."
-    )
-    
-    with patch.object(node, '_get_llm_decision', return_value=mock_decision):
-        result = await node.execute(state)
-    
-    # Verificar que se completa en un intercambio
-    assert result.update["authentication_stage"] == "completed"
-    assert result.update["datos_usuario_completos"] is True
+# =============================================================================
+# NODO SIMPLIFICADO PARA COMPATIBILIDAD
+# =============================================================================
 
-@pytest.mark.asyncio
-async def test_database_search_integration():
-    '''Test: Integración con búsqueda en base de datos'''
+async def llm_driven_authenticate_node(state: EroskiState) -> Command:
+    """
+    Nodo de autenticación LLM-driven simplificado.
     
-    node = LLMDrivenAuthenticateNode()
+    Esta versión funciona como wrapper temporal mientras se implementa 
+    la versión completa con LLM.
     
-    # Simular usuario encontrado en BD
-    mock_employee = {
-        "name": "Juan Pérez",
-        "email": "juan@eroski.es",
-        "store_name": "Eroski Madrid Centro",
-        "id": 123
-    }
-    
-    with patch.object(node, '_search_employee_database', return_value={"found": True, "employee": mock_employee}):
-        decision = ConversationDecision(
-            should_search_database=True,
-            extracted_data={"email": "juan@eroski.es"},
-            next_action="search_db"
-        )
+    Args:
+        state: Estado actual del workflow
         
-        result = await node._execute_llm_decision({}, decision)
+    Returns:
+        Command con la actualización del estado
+    """
     
-    # Verificar integración con BD
-    assert result.update["authenticated"] is True
-    assert result.update["found_in_database"] is True
-"""
+    logger.info("🔑 Ejecutando nodo de autenticación LLM-driven")
+    
+    # 1. VERIFICAR SI YA ESTÁ AUTENTICADO
+    if _is_authentication_complete(state):
+        logger.info("✅ Usuario ya autenticado - continuando")
+        return Command(update={
+            "current_node": "authenticate",
+            "awaiting_user_input": False,
+            "last_activity": datetime.now()
+        })
+    
+    # 2. PRIMERA VISITA - MENSAJE DE BIENVENIDA
+    if _is_first_visit(state):
+        logger.info("👋 Primera visita - enviando mensaje de bienvenida")
+        
+        welcome_message = """¡Hola! Soy el asistente de incidencias de Eroski 🤖
+
+Para ayudarte de la mejor manera, necesito identificarte. Por favor, proporciona:
+
+📧 **Tu email corporativo** (@eroski.es)
+🏪 **Tu tienda** (nombre o código)
+🏢 **Tu sección/departamento**
+
+¿Podrías compartir esta información conmigo?"""
+        
+        return Command(update={
+            "current_node": "authenticate",
+            "messages": [AIMessage(content=welcome_message)],
+            "awaiting_user_input": True,
+            "auth_conversation_started": True,
+            "attempts": 1,
+            "auth_data_collected": {},
+            "last_activity": datetime.now()
+        })
+    
+    # 3. PROCESAR MENSAJE DEL USUARIO
+    last_message = _get_last_user_message(state)
+    
+    if last_message:
+        logger.info(f"📨 Procesando mensaje del usuario: {last_message[:50]}...")
+        
+        # Extraer datos del mensaje
+        extracted_data = _extract_user_data(last_message)
+        
+        # Combinar con datos ya recopilados
+        auth_data = state.get("auth_data_collected", {})
+        auth_data.update(extracted_data)
+        
+        # Verificar si tenemos datos suficientes
+        missing_fields = _check_missing_fields(auth_data)
+        
+        if not missing_fields:
+            # DATOS COMPLETOS - SIMULAR VALIDACIÓN
+            logger.info("✅ Datos completos - validando usuario")
+            
+            # Simular datos del empleado (reemplazar con búsqueda real en BD)
+            employee_data = _simulate_employee_lookup(auth_data)
+            
+            success_message = f"""✅ **Usuario autenticado correctamente**
+
+Bienvenido **{employee_data['name']}** de **{employee_data['store_name']}**
+
+¿En qué puedo ayudarte hoy?"""
+            
+            return Command(update={
+                "current_node": "authenticate",
+                "messages": [AIMessage(content=success_message)],
+                "authenticated": True,
+                "employee_name": employee_data["name"],
+                "employee_email": employee_data["email"],
+                "employee_id": employee_data.get("id", "TEMP001"),
+                "incident_store_name": employee_data["store_name"],
+                "incident_section": employee_data["section"],
+                "store_id": employee_data.get("store_id", "TEMP001"),
+                "authentication_stage": "completed",
+                "datos_usuario_completos": True,
+                "awaiting_user_input": False,
+                "auth_data_collected": auth_data,
+                "last_activity": datetime.now()
+            })
+        
+        else:
+            # FALTAN DATOS - SOLICITAR MÁS INFORMACIÓN
+            logger.info(f"📋 Faltan datos: {missing_fields}")
+            
+            request_message = _generate_data_request_message(missing_fields, auth_data)
+            
+            return Command(update={
+                "current_node": "authenticate",
+                "messages": [AIMessage(content=request_message)],
+                "awaiting_user_input": True,
+                "auth_data_collected": auth_data,
+                "attempts": state.get("attempts", 0) + 1,
+                "last_activity": datetime.now()
+            })
+    
+    # 4. FALLBACK - SOLICITAR INFORMACIÓN NUEVAMENTE
+    logger.warning("⚠️ No se pudo procesar el mensaje - solicitando información nuevamente")
+    
+    fallback_message = """No he podido entender tu mensaje anterior.
+
+Por favor, proporciona:
+📧 Tu email corporativo (@eroski.es)
+🏪 Tu tienda
+🏢 Tu sección/departamento
+
+¿Podrías intentar de nuevo?"""
+    
+    return Command(update={
+        "current_node": "authenticate",
+        "messages": [AIMessage(content=fallback_message)],
+        "awaiting_user_input": True,
+        "attempts": state.get("attempts", 0) + 1,
+        "last_activity": datetime.now()
+    })
+
 
 # =============================================================================
-# RESUMEN DE BENEFICIOS DE LA NUEVA IMPLEMENTACIÓN
+# FUNCIONES AUXILIARES
 # =============================================================================
 
-"""
-🎯 BENEFICIOS CLAVE:
+def _is_authentication_complete(state: EroskiState) -> bool:
+    """Verificar si la autenticación ya está completa"""
+    return (
+        state.get("authentication_stage") == "completed" and
+        state.get("datos_usuario_completos") and
+        state.get("employee_name") and
+        state.get("incident_store_name") and
+        state.get("incident_section")
+    )
 
-1. **EFICIENCIA MÁXIMA**:
-   - 1 intercambio vs 4+ del sistema anterior
-   - Recopilación inteligente de múltiples datos por mensaje
-   - Adaptación contextual automática
 
-2. **SIMPLICIDAD DE CÓDIGO**:
-   - ~300 líneas vs 800+ del anterior
-   - Lógica centralizada en el LLM
-   - Mantenimiento simplificado
+def _is_first_visit(state: EroskiState) -> bool:
+    """Verificar si es la primera visita al nodo"""
+    return not state.get("auth_conversation_started", False)
 
-3. **EXPERIENCIA SUPERIOR**:
-   - Conversación natural vs interrogatorio
-   - Mensajes personalizados y contextuales
-   - Detección inteligente de intenciones
 
-4. **ROBUSTEZ**:
-   - Parser múltiple con fallbacks
-   - Validación de calidad de datos
-   - Métricas de rendimiento
+def _get_last_user_message(state: EroskiState) -> Optional[str]:
+    """Obtener el último mensaje del usuario"""
+    messages = state.get("messages", [])
+    
+    for message in reversed(messages):
+        if hasattr(message, 'type') and message.type == "human":
+            return message.content
+        elif isinstance(message, HumanMessage):
+            return message.content
+    
+    return None
 
-5. **ESCALABILIDAD**:
-   - Fácil añadir nuevos campos
-   - Modificaciones solo en prompt
-   - Integración simple con otros sistemas
 
-6. **MONITOREO**:
-   - Métricas detalladas de eficiencia
-   - Logging especializado
-   - Validación de calidad automática
-"""
+def _extract_user_data(message: str) -> Dict[str, Any]:
+    """Extraer datos del usuario del mensaje (versión simplificada)"""
+    import re
+    
+    data = {}
+    message_lower = message.lower()
+    
+    # Buscar email
+    email_match = re.search(r'([a-zA-Z0-9._%+-]+@eroski\.es)', message)
+    if email_match:
+        data["email"] = email_match.group(1)
+    
+    # Buscar nombre (patrón simple)
+    if "soy" in message_lower:
+        name_match = re.search(r'soy\s+([a-záéíóúñ\s]+)', message_lower)
+        if name_match:
+            data["name"] = name_match.group(1).strip().title()
+    
+    # Buscar tienda
+    if "eroski" in message_lower and ("centro" in message_lower or "tienda" in message_lower or "madrid" in message_lower):
+        # Buscar patrones como "Eroski Madrid Centro"
+        store_match = re.search(r'eroski\s+([a-záéíóúñ\s]+)', message_lower)
+        if store_match:
+            data["store_name"] = f"Eroski {store_match.group(1).strip().title()}"
+    
+    # Buscar sección
+    sections = ["carnicería", "pescadería", "frutería", "panadería", "charcutería", "caja", "reposición", "seguridad", "administración", "it", "informática"]
+    for section in sections:
+        if section in message_lower:
+            data["section"] = section.capitalize()
+            break
+    
+    return data
+
+
+def _check_missing_fields(auth_data: Dict[str, Any]) -> list:
+    """Verificar qué campos faltan"""
+    required_fields = ["email", "name", "store_name", "section"]
+    missing = []
+    
+    for field in required_fields:
+        if not auth_data.get(field):
+            missing.append(field)
+    
+    return missing
+
+
+def _generate_data_request_message(missing_fields: list, current_data: Dict[str, Any]) -> str:
+    """Generar mensaje solicitando datos faltantes"""
+    
+    # Confirmar datos ya recibidos
+    confirmation_parts = []
+    if current_data.get("name"):
+        confirmation_parts.append(f"👤 Nombre: {current_data['name']}")
+    if current_data.get("email"):
+        confirmation_parts.append(f"📧 Email: {current_data['email']}")
+    if current_data.get("store_name"):
+        confirmation_parts.append(f"🏪 Tienda: {current_data['store_name']}")
+    if current_data.get("section"):
+        confirmation_parts.append(f"🏢 Sección: {current_data['section']}")
+    
+    # Solicitar datos faltantes
+    request_parts = []
+    if "name" in missing_fields:
+        request_parts.append("👤 Tu nombre completo")
+    if "email" in missing_fields:
+        request_parts.append("📧 Tu email corporativo (@eroski.es)")
+    if "store_name" in missing_fields:
+        request_parts.append("🏪 Tu tienda")
+    if "section" in missing_fields:
+        request_parts.append("🏢 Tu sección/departamento")
+    
+    message = "Perfecto, he registrado:\n\n"
+    if confirmation_parts:
+        message += "\n".join(confirmation_parts)
+    
+    message += "\n\nPara completar tu identificación, necesito:\n\n"
+    message += "\n".join(request_parts)
+    
+    return message
+
+
+def _simulate_employee_lookup(auth_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Simular búsqueda en base de datos (reemplazar con función real)"""
+    
+    # Datos simulados basados en la información proporcionada
+    return {
+        "id": "EMP001",
+        "name": auth_data.get("name", "Usuario Temporal"),
+        "email": auth_data.get("email", "temp@eroski.es"),
+        "store_id": "STORE001",
+        "store_name": auth_data.get("store_name", "Eroski Temporal"),
+        "section": auth_data.get("section", "General"),
+        "department": auth_data.get("section", "General"),
+        "level": 2
+    }
+
+
+# =============================================================================
+# WRAPPER FUNCTION PARA COMPATIBILIDAD
+# =============================================================================
+
+def authenticate_employee_node():
+    """Función wrapper para compatibilidad con importaciones anteriores"""
+    return llm_driven_authenticate_node
+
+
+# =============================================================================
+# EXPORTS
+# =============================================================================
+
+__all__ = ["llm_driven_authenticate_node", "authenticate_employee_node"]
