@@ -180,7 +180,7 @@ async def run_setup_mode(settings, logger):
     logger.info("🔧 Iniciando modo de setup...")
     
     try:
-        from scripts.setup_db import setup_database
+        from database.scripts.setup_db import setup_database
         from scripts.verify_config import verify_configuration
         
         # 1. Verificar configuración
